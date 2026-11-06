@@ -8,8 +8,9 @@ rendered from front, side, top and 3/4 views to
 OUT_DIR/<file name>.<view>.png with Workbench, flat shading and the baked
 vertex colours, on the game's dark blue-violet. Files that share an asset
 name share a camera framing, so LODs compare at the same scale. MDM space
-(+Y up, facing +Z) maps to Blender as (x, -z, y), so the model faces -Y,
-Blender's front view.
+(left-handed, +Y up, facing +Z, +X the model's right) maps to Blender as
+(-x, -z, y): the model faces -Y, Blender's front view, with its right on the
+viewer's left as a model facing the viewer should.
 """
 import math
 import os
@@ -34,7 +35,7 @@ def read_mdm(path):
     verts, cols = [], []
     for i in range(nv):
         x, y, z, nx, ny, nz, w, r, g, b, a = struct.unpack_from("<3f3bB4B", data, 48 + 20 * i)
-        verts.append((x, -z, y))
+        verts.append((-x, -z, y))  # left-handed file -> Blender (right-handed)
         if WEIGHTS and a == 0:
             r = g = b = 30 + int(w * 225 / 255)
         cols.append((r, g, b, a))

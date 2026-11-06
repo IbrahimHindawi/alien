@@ -15,7 +15,10 @@
     "source": "tripo",
     "task_id": "27cfa690-234e-4e16-a0bc-df29cd50af17",
     "yaw_deg": -90,
-    "review": "accepted on attempt 3 of 3: vertical ring around the eye sphere, orange lens in front, bone fins swept back, nothing below"
+    "review": "accepted on attempt 3 of 3: vertical ring around the eye sphere, orange lens in front, bone fins swept back, nothing below",
+    "process": {
+      "core_share": 0.6
+    }
   },
   "colossus": {
     "source": "tripo",

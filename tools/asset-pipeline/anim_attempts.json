@@ -1,0 +1,145 @@
+{
+  "hero": [
+    {
+      "kind": "rig",
+      "request": {
+        "input": "c3042b53-22b7-4961-8f29-6f109aae13ac",
+        "rig_type": "biped",
+        "model": "v3.0-20260909",
+        "out_format": "glb"
+      },
+      "created": "2026-11-06T09:52:45+04:00",
+      "task_id": "dfd5380f-7ad9-43d8-9050-e5e2956bb5d5",
+      "status": "success",
+      "credits": 25.0,
+      "output": {},
+      "cache": "cache/dfd5380f-7ad9-43d8-9050-e5e2956bb5d5/model.glb"
+    },
+    {
+      "kind": "retarget",
+      "request": {
+        "input": "dfd5380f-7ad9-43d8-9050-e5e2956bb5d5",
+        "animations": [
+          "preset:idle",
+          "preset:run",
+          "preset:walk"
+        ],
+        "animate_in_place": true,
+        "out_format": "glb",
+        "export_with_geometry": true
+      },
+      "created": "2026-11-06T09:53:07+04:00",
+      "task_id": "59581785-952d-49f4-ada0-b0db08cc1fac",
+      "status": "success",
+      "credits": 30.0,
+      "output": {},
+      "cache": "cache/59581785-952d-49f4-ada0-b0db08cc1fac/model.glb"
+    }
+  ],
+  "stalker": [
+    {
+      "kind": "rig",
+      "request": {
+        "input": "2d34d10d-2773-45f8-bae7-e85d706e7e01",
+        "rig_type": "biped",
+        "model": "v3.0-20260909",
+        "out_format": "glb"
+      },
+      "created": "2026-11-06T09:53:19+04:00",
+      "task_id": "b8b6d893-a3ef-4798-992b-f5102a7d71bf",
+      "status": "success",
+      "credits": 25.0,
+      "output": {},
+      "cache": "cache/b8b6d893-a3ef-4798-992b-f5102a7d71bf/model.glb"
+    },
+    {
+      "kind": "retarget",
+      "request": {
+        "input": "b8b6d893-a3ef-4798-992b-f5102a7d71bf",
+        "animations": [
+          "preset:walk",
+          "preset:run"
+        ],
+        "animate_in_place": true,
+        "out_format": "glb",
+        "export_with_geometry": true
+      },
+      "created": "2026-11-06T09:53:33+04:00",
+      "task_id": "16071fa0-6806-4e0d-bdf8-db8d2f5dbe6e",
+      "status": "success",
+      "credits": 20.0,
+      "output": {},
+      "cache": "cache/16071fa0-6806-4e0d-bdf8-db8d2f5dbe6e/model.glb"
+    }
+  ],
+  "colossus": [
+    {
+      "kind": "rig",
+      "request": {
+        "input": "ecf465f1-6e47-4dca-906d-54d6628a4ddc",
+        "rig_type": "quadruped",
+        "model": "v2.5-20260210",
+        "out_format": "glb"
+      },
+      "created": "2026-11-06T09:53:45+04:00",
+      "task_id": "2cd317e8-2658-459a-bbe0-60905733be44",
+      "status": "success",
+      "credits": 25.0,
+      "output": {},
+      "cache": "cache/2cd317e8-2658-459a-bbe0-60905733be44/model.glb"
+    },
+    {
+      "kind": "retarget",
+      "request": {
+        "input": "2cd317e8-2658-459a-bbe0-60905733be44",
+        "animations": [
+          "preset:quadruped:walk"
+        ],
+        "animate_in_place": true,
+        "out_format": "glb",
+        "export_with_geometry": true
+      },
+      "created": "2026-11-06T09:54:07+04:00",
+      "task_id": "4ccbf0e2-adc1-4e1d-921a-b809b3f23bf7",
+      "status": "success",
+      "credits": 10.0,
+      "output": {},
+      "cache": "cache/4ccbf0e2-adc1-4e1d-921a-b809b3f23bf7/model.glb"
+    }
+  ],
+  "scuttler": [
+    {
+      "kind": "rig",
+      "request": {
+        "input": "fcc20e2e-adcc-490e-bd17-53c4b3aff7ef",
+        "rig_type": "hexapod",
+        "model": "v2.5-20260210",
+        "out_format": "glb"
+      },
+      "created": "2026-11-06T09:54:19+04:00",
+      "task_id": "035093b2-01a0-49a0-bd8b-e402f7e406f5",
+      "status": "success",
+      "credits": 25.0,
+      "output": {},
+      "cache": "cache/035093b2-01a0-49a0-bd8b-e402f7e406f5/model.glb"
+    },
+    {
+      "kind": "retarget",
+      "request": {
+        "input": "035093b2-01a0-49a0-bd8b-e402f7e406f5",
+        "animations": [
+          "preset:hexapod:walk"
+        ],
+        "animate_in_place": true,
+        "out_format": "glb",
+        "export_with_geometry": true
+      },
+      "created": "2026-11-06T09:54:40+04:00",
+      "task_id": "6dd3abc2-c4cf-4308-97d8-5a7ec0ed622c",
+      "status": "success",
+      "credits": 10.0,
+      "output": {},
+      "cache": "cache/6dd3abc2-c4cf-4308-97d8-5a7ec0ed622c/model.glb"
+    }
+  ]
+}

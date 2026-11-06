@@ -1,10 +1,17 @@
 """Shared mesh helpers for the asset pipeline (stdlib only).
 
-A mesh here is a list of triangles in MDM space (+Y up, faces +Z, metres).
-Each triangle carries its palette role and whether it glows. Writing turns it
-into a flat-shaded MDM1 file: three vertices per triangle, the face normal on
-each, the anim weight from the asset's anim rule, colour from the palette with
-the emissive mask in alpha.
+A mesh here is a list of triangles in the pipeline's working space: +Y up,
+facing +Z, metres, RIGHT-handed, so +X is the model's LEFT and the standard
+cross product of a counter-clockwise triangle points outward (Blender's
+convention, rotated). Each triangle carries its palette role and whether it
+glows. Writing turns it into a flat-shaded MDM1 file: three vertices per
+triangle, the face normal on each, the anim weight from the asset's anim
+rule, colour from the palette with the emissive mask in alpha.
+
+The file is LEFT-handed (D3D, mesh_format.md: +X is the model's right).
+to_file() converts by negating X on positions and normals and keeping the
+index order: in left-handed space the triangle is then still counter-
+clockwise seen from outside (its standard cross product points inward).
 """
 import json
 import math
@@ -112,6 +119,11 @@ def anim_weight(spec, p, lo, hi):
     return 0.0
 
 
+def to_file(v):
+    """Working space (right-handed) to MDM file space (left-handed)."""
+    return (-v[0], v[1], v[2])
+
+
 def snorm8(v):
     return max(-127, min(127, int(round(v * 127.0))))
 
@@ -123,7 +135,7 @@ def write_mdm(path, tris, spec, palette):
     verts = bytearray()
     radius = 0.0
     for t in tris:
-        n = t.normal()
+        n = to_file(t.normal())
         nb = (snorm8(n[0]), snorm8(n[1]), snorm8(n[2]))
         rgb = palette[t.role]
         alpha = 255 if t.glow else 0
@@ -131,8 +143,10 @@ def write_mdm(path, tris, spec, palette):
             w = anim_weight(spec, p, lo, hi) if t.animated else 0.0
             wb = int(round(w * 255))
             radius = max(radius, length(p))
-            verts += struct.pack("<3f3bB4B", p[0], p[1], p[2], nb[0], nb[1], nb[2], wb,
+            q = to_file(p)
+            verts += struct.pack("<3f3bB4B", q[0], q[1], q[2], nb[0], nb[1], nb[2], wb,
                                  rgb[0], rgb[1], rgb[2], alpha)
+    lo, hi = [-hi[0], lo[1], lo[2]], [-lo[0], hi[1], hi[2]]
     nv = 3 * len(tris)
     idx = struct.pack("<%dI" % nv, *range(nv))
     head = struct.pack("<4I3f3ffI", MAGIC, VERSION, nv, nv, lo[0], lo[1], lo[2],

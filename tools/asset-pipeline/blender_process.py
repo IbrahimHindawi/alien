@@ -424,6 +424,28 @@ def make_lod(budget):
             info = _cluster(bmx, info, a_total)
             clustered = True
         n_all = len(info)
+        # a glow on the main body (a head on one mesh with the torso): split
+        # the faces near it off as their own piece, so the body's collapse
+        # cannot eat the head and the accent with it
+        if glow_centre is not None and P.get("split_head", True):
+            hr2 = (P.get("head_radius", 0.12) * H) ** 2
+            near = [i for i in info[0][1]
+                    if sum((a - b) ** 2 for a, b in zip(to_mdm(bmx.faces[i].calc_center_median()), glow_centre)) < hr2]
+            if near and len(near) < 0.5 * len(info[0][1]):
+                ns = set(near)
+                rest = [i for i in info[0][1] if i not in ns]
+                ar = lambda c: sum(bmx.faces[i].calc_area() for i in c)
+                info = [(ar(rest), rest), (ar(near), near)] + info[1:]
+                n_all = len(info)
+        # the piece that carries the glow (the head, the lens) ranks right
+        # after the body, so it is never among the pieces dropped
+        if glow_centre is not None and len(info) > 2:
+            def gdist(c):
+                return min(sum((a - b) ** 2 for a, b in zip(to_mdm(bmx.faces[i].calc_center_median()), glow_centre))
+                           for i in c)
+            gi = min(range(len(info)), key=lambda i: gdist(info[i][1]))
+            if gi > 1:
+                info.insert(1, info.pop(gi))
         core_min = int(P.get("core_share", 0.3) * budget)
         while len(info) > 1 and (len(info) - 1) * minimum + max(minimum, core_min) > budget:
             info.pop()
@@ -507,7 +529,9 @@ def make_lod(budget):
             hit = src_bvh.find_nearest(p)
             if hit[2] is not None:
                 votes[roles[hit[2]]] = votes.get(roles[hit[2]], 0) + 1
-        if gname and votes.get(gname, 0) >= 2:  # small features win at two votes of seven
+        e1, e2 = vs[1] - vs[0], vs[2] - vs[0]
+        facing = to_mdm(e1.cross(e2))[2] >= 0.0 or spec["kind"] != "unit"
+        if gname and votes.get(gname, 0) >= 2 and facing:  # small features win at two votes of seven
             role = gname
         else:
             votes.pop(gname, None)

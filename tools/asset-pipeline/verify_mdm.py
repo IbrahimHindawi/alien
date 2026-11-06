@@ -6,10 +6,10 @@
     --json  prints a machine-readable report
 
 Checks: magic, version, reserved, file size, counts, indices in range,
-bounds and radius match the vertices, triangle budget per LOD, height within
+bounds and radius match the vertices, triangle budget per LOD (read from mesh_format.md), height within
 15% of target (seeker: body height and hover), origin on the ground under the
 centre, faces +Z (the emissive feature is ahead of the body at its height), no degenerate triangles,
-normals unit length and agreeing with the CCW winding, colours on the
+normals unit length and agreeing with CCW winding in left-handed space, colours on the
 palette (at most 4, glow only in the asset's glow colour with A=255),
 anim weights present where the archetype animates, silhouette aspect ratios,
 LODs consistent with each other. Exit status 1 when anything fails.
@@ -26,6 +26,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 MESH_DIR = os.path.join(ROOT, "shared", "assets", "meshes")
 SPEC_PATH = os.path.join(HERE, "assets.json")
+FORMAT_SPEC = os.path.join(ROOT, "shared", "specs", "mesh_format.md")
+
+
+def spec_budgets():
+    """The triangle budgets table of shared/specs/mesh_format.md, by mesh name
+    ('props' for every prop). The spec is the authority, not assets.json."""
+    out = {}
+    with open(FORMAT_SPEC, "r", encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r"\|\s*([a-z_]+)\s*\|\s*<=\s*(\d+)\s*\|\s*<=\s*(\d+)\s*\|\s*<=\s*(\d+)\s*\|", line)
+            if m:
+                out[m.group(1)] = [int(m.group(2)), int(m.group(3)), int(m.group(4))]
+    if not out:
+        raise SystemExit("verify_mdm: no budget table found in " + FORMAT_SPEC)
+    return out
 
 HEADER = struct.Struct("<IIII3f3ffI")
 VERTEX = struct.Struct("<fffbbbBBBBB")
@@ -85,7 +100,14 @@ def check(path, specs, problems, info):
     ntri = m["icount"] // 3
     info["triangles"] = ntri
     info["vertices"] = nv
-    budget = spec["budgets"][lod] if lod < len(spec["budgets"]) else None
+    table = spec_budgets()
+    row = table.get(name) or (table.get("props") if spec["kind"] == "prop" else None)
+    if row is None:
+        problems.append("no budget for '%s' in mesh_format.md" % name)
+        return None
+    if spec.get("budgets") != row:
+        problems.append("assets.json budgets %s differ from mesh_format.md %s" % (spec.get("budgets"), row))
+    budget = row[lod] if lod < len(row) else None
     if budget is None:
         problems.append("LOD %d has no budget" % lod)
     elif ntri > budget:
@@ -145,7 +167,9 @@ def check(path, specs, problems, info):
             ln = math.sqrt(sum(x * x for x in n))
             if abs(ln - 1.0) > 0.03:
                 badn += 1
-            elif (n[0] * cr[0] + n[1] * cr[1] + n[2] * cr[2]) <= 0:
+            elif (n[0] * cr[0] + n[1] * cr[1] + n[2] * cr[2]) >= 0:
+                # left-handed (D3D): a triangle counter-clockwise seen from
+                # outside has its standard cross product pointing inward
                 flipped += 1
         cen = [(a[i] + b[i] + c[i]) / 3.0 for i in range(3)]
         area_sum += area
@@ -162,7 +186,8 @@ def check(path, specs, problems, info):
     if badn:
         problems.append("%d vertex normals not unit length" % badn)
     if flipped:
-        problems.append("%d vertex normals disagree with the CCW winding" % flipped)
+        problems.append("%d triangles are not counter-clockwise from outside in left-handed space "
+                        "(normal and winding disagree)" % flipped)
     if area_sum > 0:
         cx /= area_sum
         cz /= area_sum
@@ -242,6 +267,19 @@ def check(path, specs, problems, info):
         problems.append("anim weights on an asset that does not animate")
     if mode != "none" and wmax < 128:
         problems.append("anim mode %s but max weight is %d" % (mode, wmax))
+    # in place: the body never moves, only limbs carry weight
+    a = spec.get("anim", {})
+    if mode == "legs":
+        top = lo[1] + a["leg_top"] * h + 1e-4
+        moving_body = sum(1 for v in m["verts"] if v["w"] > 0 and v["p"][1] > top)
+        if moving_body:
+            problems.append("%d vertices above the leg line carry anim weight: the body must stay rigid" % moving_body)
+    if mode == "radial":
+        cy, rad = 0.5 * (lo[1] + hi[1]), 0.5 * h
+        inner = sum(1 for v in m["verts"] if v["w"] > 0 and
+                    math.sqrt(v["p"][0] ** 2 + (v["p"][1] - cy) ** 2 + v["p"][2] ** 2) < a["radial_min"] * rad - 1e-4)
+        if inner:
+            problems.append("%d body vertices inside the fin radius carry anim weight" % inner)
     if mode == "legs":
         # the weighted vertices are low: their mean height is in the lower half
         ws = [v for v in m["verts"] if v["w"] > 0]
@@ -292,7 +330,8 @@ def main(argv):
             report[name]["problems"].append("expected LODs 0,1,2, found %s" % sorted(lods))
         h0 = lods.get(0)
         for lod, (path, h, lo, hi) in lods.items():
-            if h0 and abs(h - h0[1]) > 0.1 * h0[1]:
+            tol = specs["assets"][name].get("lod_height_tolerance", 0.1)  # a reviewed, documented exception
+            if h0 and abs(h - h0[1]) > tol * h0[1]:
                 rep = report[os.path.basename(path)]
                 rep["ok"] = False
                 rep["problems"].append("height %.3f differs from LOD0 %.3f: LODs must share scale" % (h, h0[1]))

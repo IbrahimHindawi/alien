@@ -28,64 +28,64 @@
         "removed 0 loose pieces under 0.4% of the surface; 11 components, 5 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow orange_glow on bright saturated texture in region {'z_min': 0.25, 'y_min': 0.0, 'y_max': 1.0, 'x_max': 0.35} (1.3% of the surface); no saturated glow in the region; the front-most forward-facing 1.3% of the surface used",
-        "LOD0: 246 triangles (budget 300), per-piece collapse decimation (11 of 11 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 112 triangles (budget 120), per-piece collapse decimation (11 of 11 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 40 triangles (budget 40), per-piece collapse decimation (8 of 11 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 1.6516, offset (-0.000, 0.350, 0.064); origin on the ground under the surface centroid",
+        "LOD0: 114 triangles (budget 120), per-piece collapse decimation (12 of 12 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 60 triangles (budget 60), per-piece collapse decimation (11 of 12 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 24 triangles (budget 24), per-piece collapse decimation (5 of 8 touching-piece clusters kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 1.6836, offset (-0.000, 0.343, 0.092); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"legs\", \"leg_top\": 0.55, \"radial_min\": 0.25, \"radial_max\": 0.55}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 246,
-          "vertices": 738,
+          "triangles": 114,
+          "vertices": 342,
           "bounds_min": [
-            -0.8283,
+            -0.8441,
             0.0,
-            -0.6823
+            -0.6319
           ],
           "bounds_max": [
-            0.8281,
+            0.8444,
             0.7,
-            0.7976
+            0.7387
           ],
-          "radius": 0.9954
+          "radius": 0.9506
         },
         {
-          "triangles": 112,
-          "vertices": 336,
+          "triangles": 60,
+          "vertices": 180,
           "bounds_min": [
-            -0.8283,
-            0.0133,
-            -0.6462
+            -0.8441,
+            0.0,
+            -0.5823
           ],
           "bounds_max": [
-            0.8281,
-            0.7,
-            0.7976
+            0.8444,
+            0.7104,
+            0.7236
           ],
-          "radius": 0.9509
+          "radius": 0.9124
         },
         {
-          "triangles": 40,
-          "vertices": 120,
+          "triangles": 24,
+          "vertices": 72,
           "bounds_min": [
-            -0.8283,
-            0.0133,
-            -0.6594
+            -0.5529,
+            0.0006,
+            -0.6369
           ],
           "bounds_max": [
-            0.6785,
-            0.7102,
-            0.6417
+            0.6689,
+            0.7104,
+            0.7236
           ],
-          "radius": 0.8867
+          "radius": 0.9124
         }
       ],
       "triangles": [
-        246,
-        112,
-        40
+        114,
+        60,
+        24
       ],
       "process_report": {
         "source_triangles": 306,
@@ -143,19 +143,19 @@
         },
         "lods": [
           {
-            "budget": 300,
-            "triangles": 246,
-            "pieces": "11 of 11 pieces kept, 0 as convex hulls"
-          },
-          {
             "budget": 120,
-            "triangles": 112,
-            "pieces": "11 of 11 pieces kept, 0 as convex hulls"
+            "triangles": 114,
+            "pieces": "12 of 12 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 40,
-            "triangles": 40,
-            "pieces": "8 of 11 pieces kept, 0 as convex hulls"
+            "budget": 60,
+            "triangles": 60,
+            "pieces": "11 of 12 pieces kept, 0 as convex hulls"
+          },
+          {
+            "budget": 24,
+            "triangles": 24,
+            "pieces": "5 of 8 touching-piece clusters kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature"
           }
         ]
       },
@@ -258,64 +258,64 @@
         "removed 6 loose pieces under 0.4% of the surface; 23 components, 3 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow orange_glow on bright saturated texture in region {'z_min': 0.1, 'y_min': 0.65, 'y_max': 1.0, 'x_max': 0.3} (1.3% of the surface); no saturated glow in the region; the front-most forward-facing 1.3% of the surface used",
-        "LOD0: 745 triangles (budget 800), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 300 triangles (budget 300), per-piece collapse decimation (17 of 17 pieces kept, 3 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 80 triangles (budget 80), per-piece collapse decimation (15 of 17 pieces kept, 2 as convex hulls; glow re-placed on the faces nearest the source feature); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 1.8395, offset (0.046, 0.900, 0.266); origin on the ground under the surface centroid",
+        "LOD0: 396 triangles (budget 400), per-piece collapse decimation (18 of 18 pieces kept, 3 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 160 triangles (budget 160), per-piece collapse decimation (18 of 18 pieces kept, 3 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 60 triangles (budget 60), per-piece collapse decimation (11 of 18 pieces kept, 2 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 1.8435, offset (0.043, 0.892, 0.273); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"legs\", \"leg_top\": 0.5, \"radial_min\": 0.0, \"radial_max\": 0.05}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 745,
-          "vertices": 2235,
+          "triangles": 396,
+          "vertices": 1188,
           "bounds_min": [
-            -0.617,
+            -0.6892,
             0.0,
-            -0.6517
+            -0.6156
           ],
           "bounds_max": [
-            0.7088,
+            0.6173,
             1.8,
-            1.1843
+            1.1822
           ],
-          "radius": 1.8185
+          "radius": 1.8204
         },
         {
-          "triangles": 300,
-          "vertices": 900,
+          "triangles": 160,
+          "vertices": 480,
           "bounds_min": [
-            -0.6114,
-            0.0369,
-            -0.6202
+            -0.6416,
+            0.0274,
+            -0.6133
           ],
           "bounds_max": [
-            0.6903,
-            1.7948,
-            1.1405
+            0.6153,
+            1.8035,
+            1.1402
           ],
-          "radius": 1.8167
+          "radius": 1.8236
         },
         {
-          "triangles": 80,
-          "vertices": 240,
+          "triangles": 60,
+          "vertices": 180,
           "bounds_min": [
-            -0.6114,
-            0.0369,
-            -0.5786
+            -0.7005,
+            0.0274,
+            -0.5736
           ],
           "bounds_max": [
-            0.7016,
-            1.7079,
-            1.1316
+            0.6153,
+            1.7835,
+            1.1402
           ],
-          "radius": 1.7167
+          "radius": 1.8078
         }
       ],
       "triangles": [
-        745,
-        300,
-        80
+        396,
+        160,
+        60
       ],
       "process_report": {
         "source_triangles": 781,
@@ -374,19 +374,19 @@
         },
         "lods": [
           {
-            "budget": 800,
-            "triangles": 745,
-            "pieces": "no reduction needed"
+            "budget": 400,
+            "triangles": 396,
+            "pieces": "18 of 18 pieces kept, 3 as convex hulls"
           },
           {
-            "budget": 300,
-            "triangles": 300,
-            "pieces": "17 of 17 pieces kept, 3 as convex hulls"
+            "budget": 160,
+            "triangles": 160,
+            "pieces": "18 of 18 pieces kept, 3 as convex hulls"
           },
           {
-            "budget": 80,
-            "triangles": 80,
-            "pieces": "15 of 17 pieces kept, 2 as convex hulls; glow re-placed on the faces nearest the source feature"
+            "budget": 60,
+            "triangles": 60,
+            "pieces": "11 of 18 pieces kept, 2 as convex hulls"
           }
         ]
       },
@@ -467,64 +467,64 @@
         "removed 12 loose pieces under 0.4% of the surface; 19 components, 7 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow orange_glow on bright saturated texture in region {'z_min': 0.2, 'y_min': 0.0, 'y_max': 1.0, 'x_max': 0.6} (1.7% of the surface)",
-        "LOD0: 388 triangles (budget 500), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 190 triangles (budget 200), per-piece collapse decimation (7 of 7 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 60 triangles (budget 60), per-piece collapse decimation (7 of 7 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 1.1607, offset (0.006, 1.400, -0.032); origin on the ground under the surface centroid, body at hover height",
+        "LOD0: 246 triangles (budget 250), per-piece collapse decimation (7 of 7 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 96 triangles (budget 100), per-piece collapse decimation (7 of 7 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 40 triangles (budget 40), per-piece collapse decimation (5 of 7 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 1.1607, offset (0.009, 1.400, -0.033); origin on the ground under the surface centroid, body at hover height",
         "anim weights: {\"mode\": \"radial\", \"radial_min\": 0.7, \"radial_max\": 1.0}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 388,
-          "vertices": 1164,
+          "triangles": 246,
+          "vertices": 738,
           "bounds_min": [
-            -0.573,
+            -0.5883,
             0.95,
-            -0.3212
+            -0.3217
           ],
           "bounds_max": [
-            0.5855,
+            0.5702,
             1.85,
-            0.2569
+            0.2518
           ],
           "radius": 1.8511
         },
         {
-          "triangles": 190,
-          "vertices": 570,
+          "triangles": 96,
+          "vertices": 288,
           "bounds_min": [
-            -0.573,
+            -0.5847,
             0.9444,
-            -0.3212
+            -0.3382
           ],
           "bounds_max": [
-            0.5855,
+            0.5624,
             1.8485,
-            0.2524
+            0.2373
           ],
           "radius": 1.8526
         },
         {
-          "triangles": 60,
-          "vertices": 180,
+          "triangles": 40,
+          "vertices": 120,
           "bounds_min": [
-            -0.5651,
-            0.9654,
-            -0.3376
+            -0.5847,
+            0.9978,
+            -0.3382
           ],
           "bounds_max": [
-            0.5819,
-            1.8163,
-            0.235
+            0.5624,
+            1.7834,
+            0.3147
           ],
-          "radius": 1.8348
+          "radius": 1.8112
         }
       ],
       "triangles": [
-        388,
-        190,
-        60
+        246,
+        96,
+        40
       ],
       "process_report": {
         "source_triangles": 484,
@@ -582,19 +582,19 @@
         },
         "lods": [
           {
-            "budget": 500,
-            "triangles": 388,
-            "pieces": "no reduction needed"
-          },
-          {
-            "budget": 200,
-            "triangles": 190,
+            "budget": 250,
+            "triangles": 246,
             "pieces": "7 of 7 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 60,
-            "triangles": 60,
+            "budget": 100,
+            "triangles": 96,
             "pieces": "7 of 7 pieces kept, 0 as convex hulls"
+          },
+          {
+            "budget": 40,
+            "triangles": 40,
+            "pieces": "5 of 7 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature"
           }
         ]
       },
@@ -697,64 +697,64 @@
         "removed 0 loose pieces under 0.4% of the surface; 1 components, 1 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow red_glow on bright saturated texture in region {'z_min': 0.15, 'y_min': 0.2, 'y_max': 0.8, 'x_max': 0.45} (1.2% of the surface); no saturated glow in the region; the front-most forward-facing 1.2% of the surface used",
-        "LOD0: 2982 triangles (budget 3000), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 1000 triangles (budget 1000), per-piece collapse decimation (1 of 1 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 300 triangles (budget 300), per-piece collapse decimation (1 of 1 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 7.7075, offset (0.021, 3.500, 0.406); origin on the ground under the surface centroid",
+        "LOD0: 1498 triangles (budget 1500), per-piece collapse decimation (2 of 2 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 599 triangles (budget 600), per-piece collapse decimation (2 of 2 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 199 triangles (budget 200), per-piece collapse decimation (2 of 2 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 7.7435, offset (0.025, 3.516, 0.402); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"legs\", \"leg_top\": 0.38, \"radial_min\": 0.0, \"radial_max\": 0.05}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 2982,
-          "vertices": 8946,
+          "triangles": 1498,
+          "vertices": 4494,
           "bounds_min": [
-            -2.7713,
+            -2.8489,
             0.0,
-            -3.4399
+            -3.462
           ],
           "bounds_max": [
-            2.8137,
+            2.7938,
             7.0,
-            4.2526
+            4.2664
           ],
-          "radius": 7.0641
+          "radius": 7.0377
         },
         {
-          "triangles": 1000,
-          "vertices": 3000,
+          "triangles": 599,
+          "vertices": 1797,
           "bounds_min": [
-            -2.7356,
-            0.0,
-            -3.4253
+            -2.728,
+            0.0045,
+            -3.4474
           ],
           "bounds_max": [
-            2.7753,
-            6.9434,
-            4.2542
+            2.7254,
+            6.9758,
+            4.3349
           ],
-          "radius": 7.0025
+          "radius": 7.0357
         },
         {
-          "triangles": 300,
-          "vertices": 900,
+          "triangles": 199,
+          "vertices": 597,
           "bounds_min": [
-            -2.739,
-            0.0162,
-            -3.4253
+            -2.7727,
+            0.0639,
+            -3.401
           ],
           "bounds_max": [
-            2.7565,
-            6.8454,
-            4.2786
+            2.7484,
+            6.7722,
+            4.3094
           ],
-          "radius": 6.8808
+          "radius": 6.8566
         }
       ],
       "triangles": [
-        2982,
-        1000,
-        300
+        1498,
+        599,
+        199
       ],
       "process_report": {
         "source_triangles": 2982,
@@ -802,19 +802,19 @@
         },
         "lods": [
           {
-            "budget": 3000,
-            "triangles": 2982,
-            "pieces": "no reduction needed"
+            "budget": 1500,
+            "triangles": 1498,
+            "pieces": "2 of 2 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 1000,
-            "triangles": 1000,
-            "pieces": "1 of 1 pieces kept, 0 as convex hulls"
+            "budget": 600,
+            "triangles": 599,
+            "pieces": "2 of 2 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 300,
-            "triangles": 300,
-            "pieces": "1 of 1 pieces kept, 0 as convex hulls"
+            "budget": 200,
+            "triangles": 199,
+            "pieces": "2 of 2 pieces kept, 0 as convex hulls"
           }
         ]
       },
@@ -895,64 +895,64 @@
         "removed 2 loose pieces under 0.4% of the surface; 13 components, 2 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 20% -> graphite, lightest 15% -> bone, rest -> gunmetal; glow cyan_glow on bright saturated texture in region {'z_min': 0.0, 'y_min': 0.8, 'y_max': 1.0, 'x_max': 0.35} (0.0% of the surface)",
-        "LOD0: 2443 triangles (budget 2500), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 887 triangles (budget 900), per-piece collapse decimation (11 of 11 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 291 triangles (budget 300), per-piece collapse decimation (11 of 11 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 1.9037, offset (0.026, 0.950, 0.288); origin on the ground under the surface centroid",
+        "LOD0: 1467 triangles (budget 1500), per-piece collapse decimation (12 of 12 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 589 triangles (budget 600), per-piece collapse decimation (12 of 12 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 187 triangles (budget 200), per-piece collapse decimation (12 of 12 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 1.9033, offset (0.025, 0.950, 0.288); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"none\"}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 2443,
-          "vertices": 7329,
+          "triangles": 1467,
+          "vertices": 4401,
           "bounds_min": [
-            -0.5487,
+            -0.5997,
             0.0,
-            -0.4835
+            -0.4825
           ],
           "bounds_max": [
-            0.6002,
+            0.5468,
             1.9,
-            1.0595
+            1.057
           ],
-          "radius": 2.1376
+          "radius": 2.1368
         },
         {
-          "triangles": 887,
-          "vertices": 2661,
+          "triangles": 589,
+          "vertices": 1767,
           "bounds_min": [
-            -0.5466,
+            -0.5847,
             0.0,
-            -0.4822
+            -0.4825
           ],
           "bounds_max": [
-            0.6002,
-            1.9017,
-            1.0577
+            0.5373,
+            1.9012,
+            1.0488
           ],
-          "radius": 2.1325
+          "radius": 2.1374
         },
         {
-          "triangles": 291,
-          "vertices": 873,
+          "triangles": 187,
+          "vertices": 561,
           "bounds_min": [
-            -0.5433,
-            0.0,
-            -0.4427
+            -0.5519,
+            0.0137,
+            -0.4431
           ],
           "bounds_max": [
-            0.5695,
-            1.8826,
-            1.0458
+            0.5455,
+            1.8822,
+            1.0451
           ],
-          "radius": 2.0906
+          "radius": 2.0847
         }
       ],
       "triangles": [
-        2443,
-        887,
-        291
+        1467,
+        589,
+        187
       ],
       "process_report": {
         "source_triangles": 2491,
@@ -1010,19 +1010,19 @@
         },
         "lods": [
           {
-            "budget": 2500,
-            "triangles": 2443,
-            "pieces": "no reduction needed"
+            "budget": 1500,
+            "triangles": 1467,
+            "pieces": "12 of 12 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 900,
-            "triangles": 887,
-            "pieces": "11 of 11 pieces kept, 0 as convex hulls"
+            "budget": 600,
+            "triangles": 589,
+            "pieces": "12 of 12 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 300,
-            "triangles": 291,
-            "pieces": "11 of 11 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature"
+            "budget": 200,
+            "triangles": 187,
+            "pieces": "12 of 12 pieces kept, 0 as convex hulls"
           }
         ]
       },
@@ -1103,64 +1103,64 @@
         "removed 0 loose pieces under 0.4% of the surface; 7 components, 2 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow orange_glow on bright saturated texture in region {'z_min': 0.0, 'y_min': 0.2, 'y_max': 0.95, 'x_max': 0.3} (1.1% of the surface)",
-        "LOD0: 1411 triangles (budget 1500), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 494 triangles (budget 500), per-piece collapse decimation (7 of 7 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 150 triangles (budget 150), per-piece collapse decimation (7 of 7 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 6.0117, offset (-0.012, 3.000, -0.017); origin on the ground under the surface centroid",
+        "LOD0: 794 triangles (budget 800), per-piece collapse decimation (8 of 8 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 293 triangles (budget 300), per-piece collapse decimation (8 of 8 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 98 triangles (budget 100), per-piece collapse decimation (8 of 8 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 6.0109, offset (-0.042, 3.000, -0.011); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"none\"}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 1411,
-          "vertices": 4233,
+          "triangles": 794,
+          "vertices": 2382,
           "bounds_min": [
-            -1.3099,
+            -1.2582,
             0.0,
-            -1.0446
+            -1.0438
           ],
           "bounds_max": [
-            1.285,
+            1.3388,
             6.0,
-            1.0102
+            1.0163
           ],
-          "radius": 6.1067
+          "radius": 6.103
         },
         {
-          "triangles": 494,
-          "vertices": 1482,
+          "triangles": 293,
+          "vertices": 879,
           "bounds_min": [
-            -1.3099,
+            -1.2525,
             0.0,
-            -1.0618
+            -1.0902
           ],
           "bounds_max": [
-            1.2901,
-            5.9926,
-            1.0324
+            1.366,
+            5.9987,
+            1.03
           ],
-          "radius": 6.1067
+          "radius": 6.103
         },
         {
-          "triangles": 150,
-          "vertices": 450,
+          "triangles": 98,
+          "vertices": 294,
           "bounds_min": [
-            -1.3372,
+            -1.1864,
             0.0,
-            -1.0433
+            -1.0351
           ],
           "bounds_max": [
-            1.2771,
+            1.3009,
             6.0134,
-            1.005
+            0.9849
           ],
-          "radius": 6.1327
+          "radius": 6.1298
         }
       ],
       "triangles": [
-        1411,
-        494,
-        150
+        794,
+        293,
+        98
       ],
       "process_report": {
         "source_triangles": 1411,
@@ -1213,19 +1213,19 @@
         },
         "lods": [
           {
-            "budget": 1500,
-            "triangles": 1411,
-            "pieces": "no reduction needed"
+            "budget": 800,
+            "triangles": 794,
+            "pieces": "8 of 8 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 500,
-            "triangles": 494,
-            "pieces": "7 of 7 pieces kept, 0 as convex hulls"
+            "budget": 300,
+            "triangles": 293,
+            "pieces": "8 of 8 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 150,
-            "triangles": 150,
-            "pieces": "7 of 7 pieces kept, 0 as convex hulls"
+            "budget": 100,
+            "triangles": 98,
+            "pieces": "8 of 8 pieces kept, 0 as convex hulls"
           }
         ]
       },
@@ -1284,9 +1284,9 @@
         "removed 65 loose pieces under 0.4% of the surface; 107 components, 2 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> oxide, rest -> gunmetal; glow None on bright saturated texture in region None (0.0% of the surface)",
-        "LOD0: 668 triangles (budget 1500), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 432 triangles (budget 500), per-piece collapse decimation (42 of 42 pieces kept, 5 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 150 triangles (budget 150), per-piece collapse decimation (27 of 42 pieces kept, 5 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD0: 668 triangles (budget 800), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 300 triangles (budget 300), per-piece collapse decimation (42 of 42 pieces kept, 6 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 100 triangles (budget 100), per-piece collapse decimation (5 of 5 touching-piece clusters kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
         "normalised: uniform scale 9.4041, offset (0.166, 4.693, -0.749); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"none\"}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
@@ -1296,52 +1296,52 @@
           "triangles": 668,
           "vertices": 2004,
           "bounds_min": [
-            -4.4169,
+            -4.7484,
             0.0,
             -3.0352
           ],
           "bounds_max": [
-            4.7484,
+            4.4169,
             9.0,
             1.5382
           ],
           "radius": 9.2217
         },
         {
-          "triangles": 432,
-          "vertices": 1296,
+          "triangles": 300,
+          "vertices": 900,
           "bounds_min": [
-            -4.3898,
-            0.0,
-            -3.0352
-          ],
-          "bounds_max": [
-            4.7484,
-            9.0,
-            1.5382
-          ],
-          "radius": 9.2217
-        },
-        {
-          "triangles": 150,
-          "vertices": 450,
-          "bounds_min": [
-            -4.3898,
+            -4.7484,
             0.0,
             -2.9943
           ],
           "bounds_max": [
-            4.7484,
+            4.3898,
             9.0,
-            1.3704
+            1.5382
           ],
-          "radius": 9.1579
+          "radius": 9.2217
+        },
+        {
+          "triangles": 100,
+          "vertices": 300,
+          "bounds_min": [
+            -4.7484,
+            0.0184,
+            -2.9943
+          ],
+          "bounds_max": [
+            1.4416,
+            8.9816,
+            1.4766
+          ],
+          "radius": 8.9861
         }
       ],
       "triangles": [
         668,
-        432,
-        150
+        300,
+        100
       ],
       "process_report": {
         "source_triangles": 1181,
@@ -1396,19 +1396,19 @@
         },
         "lods": [
           {
-            "budget": 1500,
+            "budget": 800,
             "triangles": 668,
             "pieces": "no reduction needed"
           },
           {
-            "budget": 500,
-            "triangles": 432,
-            "pieces": "42 of 42 pieces kept, 5 as convex hulls"
+            "budget": 300,
+            "triangles": 300,
+            "pieces": "42 of 42 pieces kept, 6 as convex hulls"
           },
           {
-            "budget": 150,
-            "triangles": 150,
-            "pieces": "27 of 42 pieces kept, 5 as convex hulls"
+            "budget": 100,
+            "triangles": 100,
+            "pieces": "5 of 5 touching-piece clusters kept, 0 as convex hulls"
           }
         ]
       },
@@ -1467,64 +1467,64 @@
         "removed 21 loose pieces under 0.4% of the surface; 47 components, 1 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow None on bright saturated texture in region None (0.0% of the surface)",
-        "LOD0: 948 triangles (budget 1500), per-piece collapse decimation (no reduction needed); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 346 triangles (budget 500), per-piece collapse decimation (26 of 26 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 150 triangles (budget 150), per-piece collapse decimation (26 of 26 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 8.0157, offset (-0.055, 4.000, 0.036); origin on the ground under the surface centroid",
+        "LOD0: 468 triangles (budget 800), per-piece collapse decimation (26 of 26 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 272 triangles (budget 300), per-piece collapse decimation (26 of 26 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 100 triangles (budget 100), per-piece collapse decimation (18 of 26 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 8.0157, offset (-0.056, 4.000, 0.035); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"none\"}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 948,
-          "vertices": 2844,
+          "triangles": 468,
+          "vertices": 1404,
           "bounds_min": [
-            -1.6752,
+            -1.5648,
             0.0,
-            -1.3965
+            -1.3999
           ],
           "bounds_max": [
-            1.5655,
+            1.6759,
             8.0,
-            1.4215
+            1.4229
           ],
           "radius": 8.0065
         },
         {
-          "triangles": 346,
-          "vertices": 1038,
+          "triangles": 272,
+          "vertices": 816,
           "bounds_min": [
-            -1.6752,
+            -1.5648,
             0.0,
-            -1.3955
+            -1.3962
           ],
           "bounds_max": [
-            1.5655,
+            1.6759,
             8.0,
-            1.4286
+            1.4279
           ],
           "radius": 8.0065
         },
         {
-          "triangles": 150,
-          "vertices": 450,
+          "triangles": 100,
+          "vertices": 300,
           "bounds_min": [
-            -1.647,
+            -1.4452,
             0.0,
-            -1.3955
+            -1.3962
           ],
           "bounds_max": [
-            1.5873,
+            1.6477,
             8.0497,
-            1.4286
+            1.4184
           ],
-          "radius": 8.0531
+          "radius": 8.0532
         }
       ],
       "triangles": [
-        948,
-        346,
-        150
+        468,
+        272,
+        100
       ],
       "process_report": {
         "source_triangles": 1368,
@@ -1579,19 +1579,19 @@
         },
         "lods": [
           {
-            "budget": 1500,
-            "triangles": 948,
-            "pieces": "no reduction needed"
-          },
-          {
-            "budget": 500,
-            "triangles": 346,
+            "budget": 800,
+            "triangles": 468,
             "pieces": "26 of 26 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 150,
-            "triangles": 150,
+            "budget": 300,
+            "triangles": 272,
             "pieces": "26 of 26 pieces kept, 0 as convex hulls"
+          },
+          {
+            "budget": 100,
+            "triangles": 100,
+            "pieces": "18 of 26 pieces kept, 0 as convex hulls"
           }
         ]
       },
@@ -1650,64 +1650,64 @@
         "removed 3 loose pieces under 0.4% of the surface; 7 components, 1 large (>=5%)",
         "sampled the base colour texture at 7 points per source triangle",
         "palette: faces ranked by texture luminance, darkest 50% -> graphite, lightest 10% -> bone, rest -> gunmetal; glow orange_glow on bright saturated texture in region {'z_min': -10.0, 'y_min': 0.6, 'y_max': 1.0, 'x_max': 1.0} (1.3% of the surface); no saturated glow in the region; the front-most forward-facing 1.3% of the surface used",
-        "LOD0: 1356 triangles (budget 1500), per-piece collapse decimation (4 of 4 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD1: 483 triangles (budget 500), per-piece collapse decimation (4 of 4 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
-        "LOD2: 150 triangles (budget 150), per-piece collapse decimation (4 of 4 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature); per-face colour by majority vote of the source roles under 7 points",
-        "normalised: uniform scale 10.0196, offset (-0.022, 5.000, 0.038); origin on the ground under the surface centroid",
+        "LOD0: 757 triangles (budget 800), per-piece collapse decimation (5 of 5 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD1: 293 triangles (budget 300), per-piece collapse decimation (5 of 5 pieces kept, 0 as convex hulls); per-face colour by majority vote of the source roles under 7 points",
+        "LOD2: 100 triangles (budget 100), per-piece collapse decimation (5 of 5 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature); per-face colour by majority vote of the source roles under 7 points",
+        "normalised: uniform scale 10.0437, offset (-0.019, 4.988, 0.033); origin on the ground under the surface centroid",
         "anim weights: {\"mode\": \"none\"}",
         "written flat-shaded MDM1 by mdmlib.write_mdm (3 vertices per triangle, face normals)"
       ],
       "lods": [
         {
-          "triangles": 1356,
-          "vertices": 4068,
+          "triangles": 757,
+          "vertices": 2271,
           "bounds_min": [
-            -2.2237,
+            -2.1621,
             0.0,
-            -2.2227
+            -2.2062
           ],
           "bounds_max": [
-            2.1795,
+            2.2262,
             10.0,
-            2.2979
+            2.2734
           ],
           "radius": 10.0001
         },
         {
-          "triangles": 483,
-          "vertices": 1449,
+          "triangles": 293,
+          "vertices": 879,
           "bounds_min": [
-            -2.2237,
-            0.024,
-            -2.1967
+            -2.0437,
+            0.0,
+            -2.1017
           ],
           "bounds_max": [
-            2.1541,
+            2.0111,
             10.0,
-            2.2721
+            2.1628
           ],
           "radius": 10.0001
         },
         {
-          "triangles": 150,
-          "vertices": 450,
+          "triangles": 100,
+          "vertices": 300,
           "bounds_min": [
-            -2.0092,
+            -1.3028,
             0.0,
-            -2.0925
+            -2.1017
           ],
           "bounds_max": [
-            1.2968,
+            2.0111,
             10.0,
-            1.625
+            1.6248
           ],
           "radius": 10.0001
         }
       ],
       "triangles": [
-        1356,
-        483,
-        150
+        757,
+        293,
+        100
       ],
       "process_report": {
         "source_triangles": 1548,
@@ -1761,19 +1761,19 @@
         },
         "lods": [
           {
-            "budget": 1500,
-            "triangles": 1356,
-            "pieces": "4 of 4 pieces kept, 0 as convex hulls"
+            "budget": 800,
+            "triangles": 757,
+            "pieces": "5 of 5 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 500,
-            "triangles": 483,
-            "pieces": "4 of 4 pieces kept, 0 as convex hulls"
+            "budget": 300,
+            "triangles": 293,
+            "pieces": "5 of 5 pieces kept, 0 as convex hulls"
           },
           {
-            "budget": 150,
-            "triangles": 150,
-            "pieces": "4 of 4 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature"
+            "budget": 100,
+            "triangles": 100,
+            "pieces": "5 of 5 pieces kept, 0 as convex hulls; glow re-placed on the faces nearest the source feature"
           }
         ]
       },

@@ -114,6 +114,37 @@ def composite(name, raw_dir):
     over.save(os.path.join(PREVIEWS, "%s.png" % name))
 
 
+def distance_sheet(name, raw_dir, frame_px=384, model_px=50, blow=4):
+    """Each LOD's front, 3/4 and top views shrunk so the model is about
+    model_px tall (a unit at gameplay distance), then enlarged blow times
+    with nearest-neighbour so the pixels can be judged."""
+    import struct
+    from PIL import Image, ImageDraw
+    heads = []
+    for lod in range(3):
+        with open(os.path.join(MESHES, "%s.lod%d.mdm" % (name, lod)), "rb") as f:
+            heads.append(struct.unpack_from("<6f", f.read(40), 16))
+    lo = [min(h[i] for h in heads) for i in range(3)]
+    hi = [max(h[3 + i] for h in heads) for i in range(3)]
+    extent = max(0.1, sum((hi[i] - lo[i]) ** 2 for i in range(3)) ** 0.5)
+    height = heads[0][4] - heads[0][1]
+    k = model_px / (frame_px * height / (extent * 1.05))  # render frame px -> on-screen px
+    small = max(8, int(frame_px * k))
+    cells = []
+    for lod in range(3):
+        for v in ("front", "34", "top"):
+            im = Image.open(os.path.join(raw_dir, "%s.lod%d.mdm.%s.png" % (name, lod, v))).convert("RGB")
+            im = im.resize((small, small), Image.LANCZOS).resize((small * blow, small * blow), Image.NEAREST)
+            cells.append(im)
+    cw = small * blow
+    sheet = Image.new("RGB", (cw * 3, cw * 3 + 18), (0, 0, 0))
+    for i, im in enumerate(cells):
+        sheet.paste(im, ((i % 3) * cw, 18 + (i // 3) * cw))
+    ImageDraw.Draw(sheet).text((4, 3), "%s at gameplay size (model ~%d px tall), x%d; rows LOD0-2; front, 3/4, top"
+                               % (name, model_px, blow), fill=(200, 200, 210))
+    sheet.save(os.path.join(PREVIEWS, "%s.distance.png" % name))
+
+
 def render(names):
     raw = os.path.join(CACHE, "renders")
     os.makedirs(PREVIEWS, exist_ok=True)
@@ -121,6 +152,7 @@ def render(names):
     run_blender("blender_render.py", [raw, "384"] + files)
     for n in names:
         composite(n, raw)
+        distance_sheet(n, raw)
 
 
 # ---------------------------------------------------------------- provenance

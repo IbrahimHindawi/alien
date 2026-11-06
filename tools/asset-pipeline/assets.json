@@ -52,9 +52,9 @@
       "kind": "unit",
       "height": 0.7,
       "budgets": [
-        300,
         120,
-        40
+        60,
+        24
       ],
       "colors": [
         "graphite",
@@ -96,9 +96,9 @@
       "kind": "unit",
       "height": 1.8,
       "budgets": [
-        800,
-        300,
-        80
+        400,
+        160,
+        60
       ],
       "colors": [
         "graphite",
@@ -141,9 +141,9 @@
       "height": 0.9,
       "hover": 1.4,
       "budgets": [
-        500,
-        200,
-        60
+        250,
+        100,
+        40
       ],
       "colors": [
         "graphite",
@@ -178,15 +178,17 @@
       "tone": {
         "dark": 0.5,
         "bone": 0.1
-      }
+      },
+      "lod_height_tolerance": 0.15,
+      "lod_height_note": "At 40 triangles the ring collapses from an octagon to about five segments and loses ~13% of its vertical extent; the transform is shared, the shape is what decimation can keep. Accepted after review."
     },
     "colossus": {
       "kind": "unit",
       "height": 7.0,
       "budgets": [
-        3000,
-        1000,
-        300
+        1500,
+        600,
+        200
       ],
       "colors": [
         "graphite",
@@ -228,9 +230,9 @@
       "kind": "unit",
       "height": 1.9,
       "budgets": [
-        2500,
-        900,
-        300
+        1500,
+        600,
+        200
       ],
       "colors": [
         "graphite",
@@ -269,9 +271,9 @@
       "kind": "prop",
       "height": 6.0,
       "budgets": [
-        1500,
-        500,
-        150
+        800,
+        300,
+        100
       ],
       "colors": [
         "graphite",
@@ -306,9 +308,9 @@
       "kind": "prop",
       "height": 9.0,
       "budgets": [
-        1500,
-        500,
-        150
+        800,
+        300,
+        100
       ],
       "colors": [
         "graphite",
@@ -338,9 +340,9 @@
       "kind": "prop",
       "height": 8.0,
       "budgets": [
-        1500,
-        500,
-        150
+        800,
+        300,
+        100
       ],
       "colors": [
         "graphite",
@@ -370,9 +372,9 @@
       "kind": "prop",
       "height": 10.0,
       "budgets": [
-        1500,
-        500,
-        150
+        800,
+        300,
+        100
       ],
       "colors": [
         "graphite",
