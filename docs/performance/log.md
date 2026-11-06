@@ -47,3 +47,43 @@ there is per-entity row setup. **Kept.**
 Next candidates: the grid's fixed per-tick cost (zeroing and prefix-summing
 4 MB of counters regardless of population: ~1.5 M cycles, most of the 100k
 grid figure), its random count/scatter traffic at 1M, and then threads.
+
+## 2026-11-06: SIM 4 combat, then threads (kept)
+
+SIM 4 adds combat after integration (fire, piercing projectiles, contact,
+stable compaction of the dead, ring spawning); the bench keeps the
+population constant, so dead aliens respawn on the ring. Single thread,
+SIM 4, plain grid:
+
+| entities | us/tick | grid c/e | separate c/e | integrate c/e |
+|---|---|---|---|---|
+| 100k | 1375 (1371..1387) | 19.2 | 36.2 | 1.92 |
+| 1M | 14472 (14468..14651) | 25.3 | 33.0 | 2.62 |
+
+- **Change**: a fixed worker pool (`platform/threads.rasm`; WaitOnAddress
+  between jobs, atomic chunk counter, main thread participates). Separation
+  (chunks of 2048 sorted slots) and integration (chunks of 16384) are range
+  jobs. The counting sort runs as 32 row bands (`grid_mt.rasm`): each band
+  streams all cells but counts and scatters only its own, so the sorted order
+  is the single-threaded one.
+- **Correctness**: every reference scenario is checked at 1 and 16 threads
+  (identical hashes; also 2 and 32 by hand), plus a self test comparing the
+  banded grid with `sim_grid` on 50 000 crowded entities.
+- **Bug found on the way**: workers read the generation counter when they
+  started; a worker starting after the first dispatch took that job as
+  already seen and the dispatcher waited forever. Workers now start from 0.
+
+16 threads (cycles are wall-clock rdtsc on the main thread, per entity):
+
+| entities | us/tick | grid | separate | integrate |
+|---|---|---|---|---|
+| 100k | 695 (685..719) | 17.2 | 7.8 | 2.5 |
+| 1M | 5130 (5043..5172) | 12.1 | 6.2 | 1.4 |
+
+2.8x on a 1M tick (14.5 -> 5.1 ms); separation scales 5.3x, the grid only
+2.1x (every band rereads all 1M cells: 32 x 4 MB per pass) and integration is
+bandwidth-bound. At 100k the fixed costs dominate (the grid's 4 MB of
+counters). The banded grid is 4.7x slower than `sim_grid` on one thread, so
+the single-threaded path keeps `sim_grid`. **Kept.** Next: the grid's
+per-band rereads (bin by band once, then sort within bands), and threaded
+culling.

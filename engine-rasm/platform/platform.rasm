@@ -21,6 +21,7 @@ opt_dump: *u8 = 0                      ; --dump-state path: raw state after a be
 opt_width: u32 = 1600
 opt_height: u32 = 900
 opt_test: u32 = 0                      ; --test: run the self tests and exit
+opt_threads: u32 = 16                  ; --threads N, including the main thread
 opt_spawn_set: u32 = 0                 ; --spawn-half given: a stress scene instead of a run
 
 ; window -----------------------------------------------------------------
@@ -472,6 +473,18 @@ next:
         mov opt_entities, eax
         jmp advance
     not_entities:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--threads")
+    test eax, eax
+    jz not_threads
+        call next_number
+        test edx, edx
+        jz failure
+        test eax, eax
+        jz failure
+        mov opt_threads, eax
+        jmp advance
+    not_threads:
     mov rcx, [rsi + rdi*8]
     invoke(string_equal, rcx, "--seed")
     test eax, eax

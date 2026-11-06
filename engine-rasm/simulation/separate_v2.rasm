@@ -24,7 +24,8 @@ k_lane_valid: [72]const u32[align(32)] = {
     0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
 }
 
-sim_separate_v2: proc() = {
+; ecx: first sorted slot, edx: one past the last (a pool job, or 0, count)
+sim_separate_v2: proc(begin: u32, end: u32, chunk: u32) = {
     push rbp
     push rbx
     push rsi
@@ -41,9 +42,9 @@ sim_separate_v2: proc() = {
     mov r13, sim_sorted_z
     mov r14, sim_sorted_id
     mov r15, sim_cell_start
-    mov ebx, sim_count
+    mov ebx, edx                       ; end
     vbroadcastss ymm8, k_one[0]
-    xor esi, esi                       ; s
+    mov esi, ecx                       ; s
 entity:
     cmp esi, ebx
     jae all_done

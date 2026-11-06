@@ -1,0 +1,198 @@
+; simulation/grid_mt.rasm: the grid's counting sort in row bands, for threads
+;
+; The cells are split into GRID_BANDS bands of whole rows. Each band job
+; streams every entity's cell, but counts and scatters only the cells it owns:
+;
+;   cells     (chunks of entities)  cell[i] for every entity
+;   count     (one job per band)    zero, count and prefix the band's own counters
+;   offsets   (main thread)         exclusive prefix of the band totals
+;   scatter   (one job per band)    add the band's offset, then scatter
+;                                   descending exactly as sim_grid does
+;
+; Every cell's run gets the same entities in the same (ascending) order as
+; the single-threaded sim_grid, so the sorted arrays are bit-identical.
+
+#define GRID_BANDS 32
+#define BAND_CELLS 32768
+#define CELL_CHUNK 65536
+
+band_total: [GRID_BANDS]u32 = {}
+band_offset: [GRID_BANDS]u32 = {}
+
+; ecx: begin, edx: end (entities; begin a multiple of 8)
+grid_cells_job: proc(begin: u32, end: u32, chunk: u32) = {
+    mov r8, sim_pos_x
+    mov r9, sim_pos_z
+    mov r10, sim_cell
+    vmovaps ymm4, ymmword ptr k_world_half
+    vmovaps ymm5, ymmword ptr k_inv_cell
+    mov eax, ecx
+    sub edx, ecx
+    add edx, 7
+    shr edx, 3                         ; blocks
+    shl rax, 2                         ; byte offset
+    test edx, edx
+    jz done
+cells:
+    vaddps ymm0, ymm4, ymmword ptr [r8 + rax]
+    vmulps ymm0, ymm0, ymm5
+    vcvttps2dq ymm0, ymm0
+    vaddps ymm1, ymm4, ymmword ptr [r9 + rax]
+    vmulps ymm1, ymm1, ymm5
+    vcvttps2dq ymm1, ymm1
+    vpslld ymm1, ymm1, GRID_SHIFT
+    vpaddd ymm0, ymm0, ymm1
+    vmovdqa ymmword ptr [r10 + rax], ymm0
+    add rax, 32
+    dec edx
+    jnz cells
+done:
+    vzeroupper
+    ret
+}
+
+; r8d: band. Zero, count and prefix the band's counters arr[lo + 1 .. lo + BAND_CELLS].
+grid_count_job: proc(begin: u32, end: u32, band: u32) = {
+    push rdi
+    push rsi
+    push rbx
+    mov ebx, r8d
+    mov r9d, ebx
+    shl r9d, 15                        ; lo cell = band * BAND_CELLS
+    mov rsi, sim_cell_arr
+    ; zero arr[lo + 1 .. lo + BAND_CELLS] (and arr[0] for band 0)
+    lea rdi, [rsi + r9*4 + 4]
+    xor eax, eax
+    mov ecx, BAND_CELLS
+    rep stosd
+    test ebx, ebx
+    jnz counted_zero
+        mov dword ptr [rsi], 0
+    counted_zero:
+    ; count: arr[c + 1] += 1 for c in the band
+    mov r10, sim_cell
+    mov ecx, sim_count
+    xor eax, eax
+    test ecx, ecx
+    jz counted
+count:
+    mov edx, dword ptr [r10 + rax*4]
+    mov r11d, edx
+    sub r11d, r9d
+    cmp r11d, BAND_CELLS
+    jae other
+    inc dword ptr [rsi + rdx*4 + 4]
+other:
+    inc eax
+    cmp eax, ecx
+    jb count
+counted:
+    ; local inclusive prefix
+    lea rdi, [rsi + r9*4 + 4]
+    xor edx, edx
+    xor eax, eax
+prefix:
+    add edx, dword ptr [rdi + rax*4]
+    mov dword ptr [rdi + rax*4], edx
+    inc eax
+    cmp eax, BAND_CELLS
+    jb prefix
+    lea rax, band_total
+    mov dword ptr [rax + rbx*4], edx
+    pop rbx
+    pop rsi
+    pop rdi
+    ret
+}
+
+; r8d: band. Offset the band's ends, then scatter its entities, i descending.
+grid_scatter_job: proc(begin: u32, end: u32, band: u32) = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r9d, r8d
+    shl r9d, 15                        ; lo cell
+    lea rax, band_offset
+    mov edx, dword ptr [rax + r8*4]
+    mov rsi, sim_cell_arr
+    lea rdi, [rsi + r9*4 + 4]
+    xor eax, eax
+offset:
+    add dword ptr [rdi + rax*4], edx
+    inc eax
+    cmp eax, BAND_CELLS
+    jb offset
+    mov r10, sim_cell
+    mov r11, sim_pos_x
+    mov r12, sim_pos_z
+    mov r13, sim_sorted_x
+    mov r14, sim_sorted_z
+    mov r15, sim_sorted_id
+    mov ecx, sim_count
+scatter:
+    test ecx, ecx
+    jz scattered
+    dec ecx
+    mov edx, dword ptr [r10 + rcx*4]   ; c
+    mov eax, edx
+    sub eax, r9d
+    cmp eax, BAND_CELLS
+    jae scatter
+    mov eax, dword ptr [rsi + rdx*4 + 4]
+    dec eax
+    mov dword ptr [rsi + rdx*4 + 4], eax
+    mov ebx, dword ptr [r11 + rcx*4]
+    mov dword ptr [r13 + rax*4], ebx
+    mov ebx, dword ptr [r12 + rcx*4]
+    mov dword ptr [r14 + rax*4], ebx
+    mov dword ptr [r15 + rax*4], ecx
+    jmp scatter
+scattered:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; The whole grid build on the pool.
+sim_grid_mt: proc() = {
+    sub rsp, 40
+    mov rcx, grid_cells_job&
+    mov edx, sim_count
+    mov r8d, CELL_CHUNK
+    call pool_dispatch
+    mov rcx, grid_count_job&
+    mov edx, GRID_BANDS
+    mov r8d, 1
+    call pool_dispatch
+    ; exclusive prefix of the band totals
+    xor ecx, ecx
+    xor edx, edx
+    lea r8, band_total
+    lea r9, band_offset
+offsets:
+    mov dword ptr [r9 + rcx*4], edx
+    add edx, dword ptr [r8 + rcx*4]
+    inc ecx
+    cmp ecx, GRID_BANDS
+    jb offsets
+    mov rcx, grid_scatter_job&
+    mov edx, GRID_BANDS
+    mov r8d, 1
+    call pool_dispatch
+    ; the end of the last cell
+    mov rax, sim_cell_arr
+    mov edx, sim_count
+    mov ecx, GRID_CELLS + 1
+    mov dword ptr [rax + rcx*4], edx
+    add rsp, 40
+    ret
+}

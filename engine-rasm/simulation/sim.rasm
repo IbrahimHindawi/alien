@@ -505,7 +505,10 @@ all_done:
 }
 
 ; Pursuit, separation, steering, integration and bounds, 8 entities a step.
-sim_integrate: proc() = {
+; ecx: first entity (a multiple of 8), edx: one past the last.
+sim_integrate: proc(begin: u32, end: u32, chunk: u32) = {
+    mov dword ptr [rsp + 8], ecx       ; home begin and end in the shadow space
+    mov dword ptr [rsp + 16], edx
     push rsi
     push rdi
     sub rsp, 168                       ; 8 + 16 + 168 = 192; xmm6..15 at [rsp + 0 .. 159]
@@ -535,10 +538,13 @@ sim_integrate: proc() = {
     mov r11, sim_vel_z
     mov rsi, sim_sep_x
     mov rdi, sim_sep_z
-    mov ecx, sim_count
+    mov ecx, dword ptr [rsp + 192]     ; begin, from rcx's home slot (184 below entry, +8)
+    mov eax, ecx
+    mov ecx, dword ptr [rsp + 200]     ; end, from rdx's home slot
+    sub ecx, eax
     add ecx, 7
     shr ecx, 3
-    xor eax, eax
+    shl rax, 2
     test ecx, ecx
     jz done
 step:
@@ -625,7 +631,13 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_hero, rcx
     mov rbx, rax
-    call sim_grid
+    cmp pool_workers, 0
+    je grid_alone
+        call sim_grid_mt               ; banded: every band streams all cells, worth it only in parallel
+        jmp grid_done
+    grid_alone:
+        call sim_grid
+    grid_done:
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -633,7 +645,10 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_grid, rcx
     mov rbx, rax
-    call sim_separate_v2
+    mov rcx, sim_separate_v2&
+    mov edx, sim_count
+    mov r8d, 2048
+    call pool_dispatch
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -641,7 +656,10 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_separate, rcx
     mov rbx, rax
-    call sim_integrate
+    mov rcx, sim_integrate&
+    mov edx, sim_count
+    mov r8d, 16384
+    call pool_dispatch
     rdtsc
     shl rdx, 32
     or rax, rdx

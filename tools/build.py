@@ -84,7 +84,7 @@ def build_rasm(env, config):
     exe = BUILD / 'md_rasm.exe'
     if not RIN.is_file():
         sys.exit(f'no rin at {RIN}; set RIN')
-    run([RIN, 'asm', 'main.rasm', '-o', exe, '-l', 'd3d11', '-l', 'dxgi', '-l', 'dxguid', '-l', 'gdi32', '-l', 'winmm'],
+    run([RIN, 'asm', 'main.rasm', '-o', exe, '-l', 'd3d11', '-l', 'dxgi', '-l', 'dxguid', '-l', 'gdi32', '-l', 'winmm', '-l', 'synchronization'],
         env, cwd=ROOT / 'engine-rasm')
 
 

@@ -16,7 +16,7 @@ EXE = ROOT / 'build' / 'md_rasm.exe'
 sys.path.insert(0, str(ROOT / 'tools'))
 import sim_reference  # noqa: E402
 
-SELF_TESTS = 5
+SELF_TESTS = 6
 SCENARIOS = [  # (entities, ticks, seed, spawn_half): sparse, dense, very dense with long hero walk
     (1000, 120, 1, 1000),
     (3000, 300, 5, 20),
@@ -51,14 +51,15 @@ def main():
         check(f'{label} ({passes}/{SELF_TESTS})', code == 0 and passes == SELF_TESTS, out.strip())
     for n, t, seed, half in (QUICK if a.quick else SCENARIOS):
         args = ['--entities', str(n), '--ticks', str(t), '--seed', str(seed), '--spawn-half', str(half)]
-        code, out = run(['--bench-sim', *args])
-        got = next((l.split()[0].split('=', 1)[1] for l in out.splitlines() if l.startswith('hash=')), None)
         s = sim_reference.Sim(n, seed, float(half))
         for _ in range(t):
             s.bench_step()
         want = f'{s.hash():016x}'
-        check(f'reference hash n={n} ticks={t} seed={seed} spawn_half={half}', code == 0 and got == want,
-              f'engine {got} reference {want}')
+        for threads in ('1', '16'):
+            code, out = run(['--bench-sim', '--threads', threads, *args])
+            got = next((l.split()[0].split('=', 1)[1] for l in out.splitlines() if l.startswith('hash=')), None)
+            check(f'reference hash n={n} ticks={t} seed={seed} spawn_half={half} threads={threads}',
+                  code == 0 and got == want, f'engine {got} reference {want}')
     print(f'{failures} failure(s)')
     sys.exit(1 if failures else 0)
 

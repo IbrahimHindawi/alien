@@ -1,0 +1,158 @@
+; platform/threads.rasm: a fixed worker pool for data-parallel phases
+;
+; One job at a time: pool_dispatch(job, total, chunk) splits [0, total) into
+; chunks of `chunk` items; the main thread and every worker take chunks from
+; an atomic counter until none are left, calling job(begin, end, chunk_index)
+; for each. A job writes only its own items' outputs, so the result never
+; depends on which thread ran which chunk: threaded runs are bit-identical to
+; single-threaded ones (tools/test.py checks this).
+;
+; Workers sleep in WaitOnAddress on the generation counter between jobs (no
+; spinning while the game renders) after a short spin for back-to-back
+; phases. The main thread spins for completion: phases are short.
+
+#define MAX_WORKERS 63
+#define SPIN_BEFORE_SLEEP 4000
+
+pool_workers: u32 = 0                  ; worker threads (the main thread is extra)
+pool_gen: u32 = 0                      ; incremented to start a job
+pool_quit: u32 = 0
+pool_job: u64 = 0                      ; proc(begin: u32, end: u32, chunk: u32)
+pool_total: u32 = 0
+pool_chunk: u32 = 0
+pool_chunks: u32 = 0
+pool_next: [16]u32[align(64)] = {}     ; [0]: next chunk; own cache line
+pool_done: [16]u32[align(64)] = {}     ; [0]: workers finished; own cache line
+pool_handles: [MAX_WORKERS]u64 = {}
+pool_sysinfo: SYSTEM_INFO = {}
+
+; ecx: total threads wanted including the main one (0: one per logical core, at most MAX_WORKERS + 1)
+pool_init: proc(threads: u32) = {
+    push rbx
+    push rsi
+    sub rsp, 56                        ; 8 + 16 + 56 = 80; 6 arguments
+    mov ebx, ecx
+    test ebx, ebx
+    jnz have_count
+        invoke(GetSystemInfo, pool_sysinfo&)
+        mov ebx, pool_sysinfo.dwNumberOfProcessors
+    have_count:
+    dec ebx                            ; workers = threads - 1
+    cmp ebx, MAX_WORKERS
+    jbe clamped
+        mov ebx, MAX_WORKERS
+    clamped:
+    mov pool_workers, ebx
+    xor esi, esi
+spawn:
+    cmp esi, ebx
+    jae spawned
+    invoke(CreateThread, 0, 262144, pool_worker&, rsi, 0, 0)
+    lea rcx, pool_handles
+    mov qword ptr [rcx + rsi*8], rax
+    inc esi
+    jmp spawn
+spawned:
+    add rsp, 56
+    pop rsi
+    pop rbx
+    ret
+}
+
+; The worker thread: wait for a new generation, run chunks, report done.
+pool_worker: proc(param: *void) -> u32 = {
+    push rbx
+    push rsi
+    sub rsp, 40                        ; 8 + 16 + 40 = 64; [rsp + 32]: the generation seen
+    ; generation 0: workers exist before the first dispatch, so a worker that
+    ; starts late still sees that first job as new (reading pool_gen here
+    ; would race with it and hang the dispatcher)
+    mov dword ptr [rsp + 32], 0
+wait:
+    mov esi, SPIN_BEFORE_SLEEP
+spin:
+    mov eax, pool_gen
+    cmp eax, dword ptr [rsp + 32]
+    jne go
+    pause
+    dec esi
+    jnz spin
+    lea rdx, [rsp + 32]
+    invoke(WaitOnAddress, pool_gen&, rdx, 4, INFINITE)
+    mov eax, pool_gen
+    cmp eax, dword ptr [rsp + 32]
+    je wait                            ; spurious wake
+go:
+    mov dword ptr [rsp + 32], eax
+    cmp pool_quit, 0
+    jne quit
+    call pool_run_chunks
+    lea rax, pool_done
+    lock inc dword ptr [rax]
+    jmp wait
+quit:
+    xor eax, eax
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
+}
+
+; Take chunks until none are left. Preserves nothing but the ABI's nonvolatiles.
+pool_run_chunks: proc() = {
+    push rbx
+    sub rsp, 32
+again:
+    lea rax, pool_next
+    mov ecx, 1
+    lock xadd dword ptr [rax], ecx     ; ecx: this chunk's index
+    cmp ecx, pool_chunks
+    jae done
+    mov r8d, ecx                       ; chunk index
+    mov eax, ecx
+    imul eax, pool_chunk
+    mov ecx, eax                       ; begin
+    add eax, pool_chunk
+    cmp eax, pool_total
+    cmova eax, pool_total
+    mov edx, eax                       ; end
+    mov rbx, pool_job
+    call rbx
+    jmp again
+done:
+    add rsp, 32
+    pop rbx
+    ret
+}
+
+; rcx: job, edx: total items, r8d: items per chunk. Returns when every chunk is done.
+pool_dispatch: proc(job: u64, total: u32, chunk: u32) = {
+    sub rsp, 40
+    mov pool_job, rcx
+    mov pool_total, edx
+    mov pool_chunk, r8d
+    lea eax, [rdx + r8 - 1]
+    xor edx, edx
+    div r8d
+    mov pool_chunks, eax
+    lea rax, pool_next
+    mov dword ptr [rax], 0
+    lea rax, pool_done
+    mov dword ptr [rax], 0
+    cmp pool_workers, 0
+    je alone
+    lock inc pool_gen                  ; publishes the job fields (x86 stores are ordered)
+    invoke(WakeByAddressAll, pool_gen&)
+alone:
+    call pool_run_chunks
+    mov ecx, pool_workers
+wait:
+    lea rax, pool_done
+    cmp dword ptr [rax], ecx
+    jae done
+    pause
+    jmp wait
+done:
+    add rsp, 40
+    ret
+}

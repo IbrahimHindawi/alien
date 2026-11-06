@@ -13,9 +13,11 @@ import "include/print.rasm"
 import "memory/arena.rasm"
 import "platform/platform.rasm"
 import "platform/crash.rasm"
+import "platform/threads.rasm"
 import "simulation/sim.rasm"
 import "simulation/separate_v2.rasm"
 import "simulation/combat.rasm"
+import "simulation/grid_mt.rasm"
 import "simulation/dump.rasm"
 import "renderer/math.rasm"
 import "renderer/camera.rasm"
@@ -412,6 +414,8 @@ main: proc(argc: i32, argv: **u8) -> i32 = {
     call sim_alloc
     test eax, eax
     jz no_memory
+    mov ecx, opt_threads
+    call pool_init
     cmp opt_test, 0
     je not_test
         call run_tests

@@ -253,6 +253,8 @@ fold:
     mov rdi, sim_vel_z
     mov ecx, 30000
     rep movsd
+    xor ecx, ecx
+    mov edx, 30000
     call sim_separate_v2
     mov rsi, sim_sep_x
     mov rdi, sim_vel_x
@@ -278,6 +280,68 @@ report:
 }
 k_fold: [1]const f32 = { 0.015 }
 
+; The banded, pooled grid build against sim_grid on a crowded state: the
+; counters and sorted columns must be identical.
+test_grid_mt: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32
+    mov ecx, 50000
+    mov edx, 33
+    call sim_init
+    mov rax, sim_pos_x
+    mov rdx, sim_pos_z
+    xor ecx, ecx
+fold:
+    vmovss xmm0, dword ptr [rax + rcx*4]
+    vmulss xmm0, xmm0, k_fold[0]
+    vmovss dword ptr [rax + rcx*4], xmm0
+    vmovss xmm0, dword ptr [rdx + rcx*4]
+    vmulss xmm0, xmm0, k_fold[0]
+    vmovss dword ptr [rdx + rcx*4], xmm0
+    inc ecx
+    cmp ecx, 50000
+    jb fold
+    call sim_grid
+    ; keep the single-threaded result: sorted_id in sep_x, counters in vel_x (the first 50000)
+    mov rsi, sim_sorted_id
+    mov rdi, sim_sep_x
+    mov ecx, 50000
+    rep movsd
+    mov rsi, sim_sorted_x
+    mov rdi, sim_sep_z
+    mov ecx, 50000
+    rep movsd
+    call sim_grid_mt
+    mov rsi, sim_sorted_id
+    mov rdi, sim_sep_x
+    mov ecx, 50000
+    repe cmpsd
+    jne bad
+    mov rsi, sim_sorted_x
+    mov rdi, sim_sep_z
+    mov ecx, 50000
+    repe cmpsd
+    jne bad
+    ; and every cell's start against a recount: cell_start must be monotonic and end at the count
+    mov rax, sim_cell_start
+    mov ecx, GRID_CELLS
+    cmp dword ptr [rax + rcx*4], 50000
+    jne bad
+    mov edx, 1
+    jmp report
+bad:
+    xor edx, edx
+report:
+    invoke(test_report, "grid on the pool equals sim_grid, crowded", rdx)
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
 ; -> eax: number of failures
 run_tests: proc() -> i32 = {
     sub rsp, 40
@@ -286,6 +350,7 @@ run_tests: proc() -> i32 = {
     call test_grid
     call test_determinism
     call test_separate_v2
+    call test_grid_mt
     mov eax, tests_failed
     add rsp, 40
     ret
