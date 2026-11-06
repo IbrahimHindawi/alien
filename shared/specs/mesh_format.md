@@ -41,7 +41,7 @@ D3D11 input layout (slot 0, per vertex):
 
 ## Conventions
 
-- +Y up, the model faces **+Z**, the origin is on the ground plane (y = 0)
+- Left-handed, as D3D: +X is the model's **right**, +Y up, the model faces **+Z**, the origin is on the ground plane (y = 0)
   under the centre of mass. Floating units (Seeker) keep their origin on the
   ground below them, with the body at hover height.
 - Metres. Target heights: scuttler 0.7, stalker 1.8, seeker body 0.9 at
@@ -51,14 +51,24 @@ D3D11 input layout (slot 0, per vertex):
 
 ## Budgets (triangles)
 
+Tightened 2026-11-06 (version 2 of the budgets): units are drawn hundreds of
+thousands of times, so every triangle counts.
+
 | mesh | lod0 | lod1 | lod2 |
 |---|---|---|---|
-| scuttler | <= 300 | <= 120 | <= 40 |
-| stalker | <= 800 | <= 300 | <= 80 |
-| seeker | <= 500 | <= 200 | <= 60 |
-| colossus | <= 3000 | <= 1000 | <= 300 |
-| hero | <= 2500 | <= 900 | <= 300 |
-| props | <= 1500 | <= 500 | <= 150 |
+| scuttler | <= 120 | <= 60 | <= 24 |
+| stalker | <= 400 | <= 160 | <= 60 |
+| seeker | <= 250 | <= 100 | <= 40 |
+| colossus | <= 1500 | <= 600 | <= 200 |
+| hero | <= 1500 | <= 600 | <= 200 |
+| props | <= 800 | <= 300 | <= 100 |
 
-LOD selection distances are in `sim_spec.md` (rendering section), the same
-in both engines.
+LOD selection distances are in `shared/specs/sim_spec.md`, section 6.
+
+## Animation
+
+All animation is **in place**: the simulation moves a unit, the animation
+never does. A clip has no root translation (the origin stays at 0 on X and
+Z for every frame; vertical bob of the body is allowed) and no root yaw.
+The first runtime form is procedural, driven by the anim weight byte; baked
+clips (vertex animation textures) follow the same rule.
