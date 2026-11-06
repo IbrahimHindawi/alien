@@ -1845,5 +1845,466 @@
       "balance_at_start": 6280,
       "tier": "unverified: the API exposes a credit balance only, not the plan. A prepaid API credit balance suggests purchased credits (s6.4), but granted or trial credits cannot be ruled out."
     }
+  },
+  "animations": {
+    "hero": {
+      "status": "baked",
+      "review": "run, walk, idle in place and seamless; flaw: Tripo's skinning ties the rifle to the right arm, so in the run it swings with the arm instead of being held",
+      "rig_task": "dfd5380f-7ad9-43d8-9050-e5e2956bb5d5",
+      "anim_task": "59581785-952d-49f4-ada0-b0db08cc1fac",
+      "rig": {
+        "rig_type": "biped",
+        "model": "v3.0-20260909"
+      },
+      "presets": [
+        "preset:idle",
+        "preset:run",
+        "preset:walk"
+      ],
+      "alignment": {
+        "rig_vs_source_scale": 1.0000003953694332,
+        "rig_vs_source_offset": [
+          2.9802322387695312e-08,
+          2.086162567138672e-07,
+          0.4990232586860657
+        ]
+      },
+      "files": {
+        "hero.lod0.vat": 5070176,
+        "hero.lod1.vat": 2035808
+      },
+      "clips": {
+        "run": {
+          "name": "run",
+          "action": "run",
+          "fps": 32.0,
+          "duration": 0.625,
+          "source_frames": [
+            9.800000071525574,
+            24.800000071525574
+          ],
+          "root_bone": "BoneRoot",
+          "body_bone": "Hip",
+          "root_travel_removed_m": 1.09722,
+          "root_yaw_removed_deg": 0.0,
+          "seam_residual_before_m": 0.17447,
+          "centroid_drift_before_seam_m": 0.01547,
+          "loop": {
+            "action_range": [
+              0.8000000715255737,
+              30.399999618530273
+            ],
+            "cycle": [
+              9.800000071525574,
+              24.800000071525574
+            ],
+            "cycle_pose_error_rig_units": 0.09153881837464374
+          },
+          "frame_count": 20
+        },
+        "idle": {
+          "name": "idle",
+          "action": "idle",
+          "fps": 3.13043,
+          "duration": 15.33333,
+          "source_frames": [
+            0.8000000715255737,
+            368.79998779296875
+          ],
+          "root_bone": "BoneRoot",
+          "body_bone": "Hip",
+          "root_travel_removed_m": 0.25667,
+          "root_yaw_removed_deg": 5.84814,
+          "seam_residual_before_m": 0.00081,
+          "centroid_drift_before_seam_m": 0.00012,
+          "loop": {
+            "action_range": [
+              0.8000000715255737,
+              368.79998779296875
+            ],
+            "cycle": [
+              0.8000000715255737,
+              368.79998779296875
+            ],
+            "cycle_pose_error_rig_units": 0.00042553360165776107
+          },
+          "frame_count": 48
+        },
+        "walk": {
+          "name": "walk",
+          "action": "walk",
+          "fps": 12.0,
+          "duration": 2.33333,
+          "source_frames": [
+            0.8000000715255737,
+            56.79999542236328
+          ],
+          "root_bone": "BoneRoot",
+          "body_bone": "Hip",
+          "root_travel_removed_m": 0.04373,
+          "root_yaw_removed_deg": 6.26362,
+          "seam_residual_before_m": 0.00112,
+          "centroid_drift_before_seam_m": 4e-05,
+          "loop": {
+            "action_range": [
+              0.8000000715255737,
+              56.79999542236328
+            ],
+            "cycle": [
+              0.8000000715255737,
+              56.79999542236328
+            ],
+            "cycle_pose_error_rig_units": 0.0005734226621781087
+          },
+          "frame_count": 28
+        }
+      },
+      "built": "2026-11-06",
+      "licence": "unverified: Tripo output (see licence_research)",
+      "validation": {
+        "hero.lod0.vat": {
+          "clips": {
+            "run": {
+              "frames": 20,
+              "fps": 32.0,
+              "max_sway_m": 0.0512,
+              "offset_from_rest_m": 0.0113,
+              "bob_m": 0.2083,
+              "seam_step_m": 0.5886,
+              "max_step_m": 0.7985,
+              "seam_step_ratio": 0.737
+            },
+            "idle": {
+              "frames": 48,
+              "fps": 3.13,
+              "max_sway_m": 0.0332,
+              "offset_from_rest_m": 0.097,
+              "bob_m": 0.0189,
+              "seam_step_m": 0.0947,
+              "max_step_m": 0.1387,
+              "seam_step_ratio": 0.683
+            },
+            "walk": {
+              "frames": 28,
+              "fps": 12.0,
+              "max_sway_m": 0.0256,
+              "offset_from_rest_m": 0.1018,
+              "bob_m": 0.0334,
+              "seam_step_m": 0.3307,
+              "max_step_m": 0.366,
+              "seam_step_ratio": 0.904
+            }
+          },
+          "height": 2.130713027757703,
+          "ok": true,
+          "problems": []
+        },
+        "hero.lod1.vat": {
+          "clips": {
+            "run": {
+              "frames": 20,
+              "fps": 32.0,
+              "max_sway_m": 0.0514,
+              "offset_from_rest_m": 0.0135,
+              "bob_m": 0.2023,
+              "seam_step_m": 0.5881,
+              "max_step_m": 0.7975,
+              "seam_step_ratio": 0.737
+            },
+            "idle": {
+              "frames": 48,
+              "fps": 3.13,
+              "max_sway_m": 0.0341,
+              "offset_from_rest_m": 0.0952,
+              "bob_m": 0.0185,
+              "seam_step_m": 0.0941,
+              "max_step_m": 0.1389,
+              "seam_step_ratio": 0.678
+            },
+            "walk": {
+              "frames": 28,
+              "fps": 12.0,
+              "max_sway_m": 0.0247,
+              "offset_from_rest_m": 0.0994,
+              "bob_m": 0.0352,
+              "seam_step_m": 0.3301,
+              "max_step_m": 0.3652,
+              "seam_step_ratio": 0.904
+            }
+          },
+          "height": 2.129305833572107,
+          "ok": true,
+          "problems": []
+        }
+      },
+      "contact_sheets": [
+        "previews/anims/hero.run.png",
+        "previews/anims/hero.idle.png",
+        "previews/anims/hero.walk.png"
+      ]
+    },
+    "stalker": {
+      "status": "baked",
+      "review": "walk and run read well: an upright stride with the scythe blades swinging, and a forward-leaning sprint",
+      "rig_task": "b8b6d893-a3ef-4798-992b-f5102a7d71bf",
+      "anim_task": "16071fa0-6806-4e0d-bdf8-db8d2f5dbe6e",
+      "rig": {
+        "rig_type": "biped",
+        "model": "v3.0-20260909"
+      },
+      "presets": [
+        "preset:walk",
+        "preset:run"
+      ],
+      "alignment": {
+        "rig_vs_source_scale": 1.0000004198653036,
+        "rig_vs_source_offset": [
+          3.5762786865234375e-07,
+          -5.960464477539062e-07,
+          0.489258348941803
+        ]
+      },
+      "files": {
+        "stalker.lod0.vat": 684448,
+        "stalker.lod1.vat": 276640
+      },
+      "clips": {
+        "walk": {
+          "name": "walk",
+          "action": "walk",
+          "fps": 12.0,
+          "duration": 2.33333,
+          "source_frames": [
+            0.8000000715255737,
+            56.79999542236328
+          ],
+          "root_bone": "BoneRoot",
+          "body_bone": "Hip",
+          "root_travel_removed_m": 0.04178,
+          "root_yaw_removed_deg": 6.26363,
+          "seam_residual_before_m": 0.00107,
+          "centroid_drift_before_seam_m": 2e-05,
+          "loop": {
+            "action_range": [
+              0.8000000715255737,
+              56.79999542236328
+            ],
+            "cycle": [
+              0.8000000715255737,
+              56.79999542236328
+            ],
+            "cycle_pose_error_rig_units": 0.0005487018835728223
+          },
+          "frame_count": 28
+        },
+        "run": {
+          "name": "run",
+          "action": "run",
+          "fps": 33.10345,
+          "duration": 0.60417,
+          "source_frames": [
+            13.300000071525574,
+            27.800000071525574
+          ],
+          "root_bone": "BoneRoot",
+          "body_bone": "Hip",
+          "root_travel_removed_m": 1.04943,
+          "root_yaw_removed_deg": 0.0,
+          "seam_residual_before_m": 0.1625,
+          "centroid_drift_before_seam_m": 0.0056,
+          "loop": {
+            "action_range": [
+              0.8000000715255737,
+              30.399999618530273
+            ],
+            "cycle": [
+              13.300000071525574,
+              27.800000071525574
+            ],
+            "cycle_pose_error_rig_units": 0.0853427270214542
+          },
+          "frame_count": 20
+        }
+      },
+      "built": "2026-11-06",
+      "licence": "unverified: Tripo output (see licence_research)",
+      "validation": {
+        "stalker.lod0.vat": {
+          "clips": {
+            "walk": {
+              "frames": 28,
+              "fps": 12.0,
+              "max_sway_m": 0.035,
+              "offset_from_rest_m": 0.0132,
+              "bob_m": 0.0456,
+              "seam_step_m": 0.2925,
+              "max_step_m": 0.3298,
+              "seam_step_ratio": 0.887
+            },
+            "run": {
+              "frames": 20,
+              "fps": 33.103,
+              "max_sway_m": 0.0633,
+              "offset_from_rest_m": 0.044,
+              "bob_m": 0.1642,
+              "seam_step_m": 0.1417,
+              "max_step_m": 0.7469,
+              "seam_step_ratio": 0.19
+            }
+          },
+          "height": 1.7085705974422392,
+          "ok": true,
+          "problems": []
+        },
+        "stalker.lod1.vat": {
+          "clips": {
+            "walk": {
+              "frames": 28,
+              "fps": 12.0,
+              "max_sway_m": 0.0292,
+              "offset_from_rest_m": 0.0191,
+              "bob_m": 0.038,
+              "seam_step_m": 0.2872,
+              "max_step_m": 0.3238,
+              "seam_step_ratio": 0.887
+            },
+            "run": {
+              "frames": 20,
+              "fps": 33.103,
+              "max_sway_m": 0.0504,
+              "offset_from_rest_m": 0.0767,
+              "bob_m": 0.1348,
+              "seam_step_m": 0.1285,
+              "max_step_m": 0.7283,
+              "seam_step_ratio": 0.176
+            }
+          },
+          "height": 1.654476917571834,
+          "ok": true,
+          "problems": []
+        }
+      },
+      "contact_sheets": [
+        "previews/anims/stalker.walk.png",
+        "previews/anims/stalker.run.png"
+      ]
+    },
+    "colossus": {
+      "status": "rejected",
+      "reason": "Tripo's quadruped auto-rig (v2.5-20260210, two rigs: 2cd317e8 and 50ca3f83) does not fit this body: the first walk yawed the body and crumpled the legs, the second stretches a front leg into a smeared slab every step; Tripo's own skinned mesh shows the same tearing, so it is the rig, not the weight transfer. No VAT is shipped; the procedural leg animation stays.",
+      "attempts": [
+        {
+          "rig_task": "2cd317e8-2658-459a-bbe0-60905733be44",
+          "anim_task": "4ccbf0e2-adc1-4e1d-921a-b809b3f23bf7",
+          "verdict": "rejected: body yaws, legs crumple"
+        },
+        {
+          "rig_task": "50ca3f83-8188-4842-a445-c3cfe3491a3f",
+          "anim_task": "dda78e88-1d8a-4a13-8b7a-2d5a1bf03962",
+          "verdict": "rejected: a front leg stretches into a slab"
+        }
+      ]
+    },
+    "scuttler": {
+      "status": "baked",
+      "review": "hexapod walk: the legs step, the body stays put; the eye faces shimmer slightly; the tick has eight legs, the hexapod rig drives six of them",
+      "rig_task": "035093b2-01a0-49a0-bd8b-e402f7e406f5",
+      "anim_task": "6dd3abc2-c4cf-4308-97d8-5a7ec0ed622c",
+      "rig": {
+        "rig_type": "hexapod",
+        "model": "v2.5-20260210"
+      },
+      "presets": [
+        "preset:hexapod:walk"
+      ],
+      "alignment": {
+        "rig_vs_source_scale": 1.000000309561232,
+        "rig_vs_source_offset": [
+          1.1920928955078125e-07,
+          -5.960464477539063e-08,
+          0.21191397309303284
+        ]
+      },
+      "files": {
+        "scuttler.lod0.vat": 123216,
+        "scuttler.lod1.vat": 64896
+      },
+      "clips": {
+        "walk": {
+          "name": "walk",
+          "action": "preset:hexapod:walk",
+          "fps": 11.68831,
+          "duration": 2.56667,
+          "source_frames": [
+            0.8000000715255737,
+            62.39999771118164
+          ],
+          "root_bone": "tripo::Root",
+          "body_bone": "tripo::0_Right_Limb_0",
+          "root_travel_removed_m": 0.01052,
+          "root_yaw_removed_deg": 0.0,
+          "seam_residual_before_m": 1e-05,
+          "centroid_drift_before_seam_m": 0.0,
+          "loop": {
+            "action_range": [
+              0.8000000715255737,
+              62.39999771118164
+            ],
+            "cycle": [
+              0.8000000715255737,
+              62.39999771118164
+            ],
+            "cycle_pose_error_rig_units": 5.298448581204631e-06
+          },
+          "frame_count": 30
+        }
+      },
+      "built": "2026-11-06",
+      "licence": "unverified: Tripo output (see licence_research)",
+      "validation": {
+        "scuttler.lod0.vat": {
+          "clips": {
+            "walk": {
+              "frames": 30,
+              "fps": 11.688,
+              "max_sway_m": 0.009,
+              "offset_from_rest_m": 0.0125,
+              "bob_m": 0.021,
+              "seam_step_m": 0.1661,
+              "max_step_m": 0.1995,
+              "seam_step_ratio": 0.832
+            }
+          },
+          "height": 1.0182611566767625,
+          "ok": true,
+          "problems": []
+        },
+        "scuttler.lod1.vat": {
+          "clips": {
+            "walk": {
+              "frames": 30,
+              "fps": 11.688,
+              "max_sway_m": 0.0083,
+              "offset_from_rest_m": 0.022,
+              "bob_m": 0.0269,
+              "seam_step_m": 0.1661,
+              "max_step_m": 0.1995,
+              "seam_step_ratio": 0.832
+            }
+          },
+          "height": 1.028668701515922,
+          "ok": true,
+          "problems": []
+        }
+      },
+      "contact_sheets": [
+        "previews/anims/scuttler.walk.png"
+      ]
+    },
+    "seeker": {
+      "status": "rejected",
+      "reason": "Tripo rig-check (free) says the seeker is not riggable (riggable false, rig_type others), and the API has no hover or idle preset for non-biped rigs. No VAT; the procedural ring/fin animation stays.",
+      "attempts": []
+    }
   }
 }

@@ -47,6 +47,27 @@ keep:
     ret
 }
 
+; ecx: keys -> sim_move_x/z rotated into the third-person camera's frame:
+; move = ix * right + iz * forward, right = (fz, -fx).
+camera_relative_move: proc(keys: u32) = {
+    sub rsp, 40
+    call keys_to_move                  ; world-axis vector, diagonal already scaled
+    vmovss xmm0, sim_move_x            ; ix
+    vmovss xmm1, sim_move_z            ; iz
+    vmovss xmm2, cam_fwd_x
+    vmovss xmm3, cam_fwd_z
+    vmulss xmm4, xmm0, xmm3            ; ix * fz
+    vmulss xmm5, xmm1, xmm2            ; iz * fx
+    vaddss xmm4, xmm4, xmm5
+    vmovss sim_move_x, xmm4
+    vmulss xmm4, xmm1, xmm3            ; iz * fz
+    vmulss xmm5, xmm0, xmm2            ; ix * fx
+    vsubss xmm4, xmm4, xmm5
+    vmovss sim_move_z, xmm4
+    add rsp, 40
+    ret
+}
+
 ; -> eax: the hero input byte from the keyboard (W=1 A=2 S=4 D=8)
 hero_read_keys: proc() -> u32 = {
     xor eax, eax

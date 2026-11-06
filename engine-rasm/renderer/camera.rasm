@@ -9,6 +9,23 @@
 #define CAM_FAR_GROUND 420.0
 
 cam_zoom: f32 = 1.0
+cam_mode: u32 = 0                      ; 0 top-down, 1 third person (V toggles)
+cam_blend: f32 = 0.0                   ; 0 top-down .. 1 third person, eased
+cam_fwd_x: f32 = 0.0                   ; third-person facing, a unit vector
+cam_fwd_z: f32 = 1.0
+cam_cursor: POINT = {}
+cam_wrect: RECT = {}
+cam_cursor_hidden: u32 = 0
+cam_skip_delta: u32 = 0
+k_blend_step: const f32 = 0.05         ; per frame
+k_look_sens: const f32 = 0.0025        ; radians per pixel
+k_sixth: const f32 = 0.16666667
+k_three: const f32 = 3.0
+k_tp_back: const f32 = 7.0
+k_tp_height: const f32 = 3.4
+k_tp_ahead: const f32 = 10.0
+k_tp_target_y: const f32 = 1.0
+k_tp_aim_y: const f32 = -0.12
 cam_height: const f32 = 38.0
 cam_back: const f32 = 24.0
 cam_ahead: const f32 = 3.0
@@ -75,6 +92,178 @@ far:
     ret
 }
 
+; V toggles the mode; mouse x turns the third-person facing; the eye and
+; target of both modes are blended by the eased cam_blend.
+camera_modes: proc() = {
+    push rbx
+    sub rsp, 80                        ; 8 + 8 + 80 = 96; xmm6, xmm7 at [rsp + 32], [rsp + 48]; [rsp + 64] centre y
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    lea rax, keys_pressed
+    cmp byte ptr [rax + 0x56], 0       ; V
+    je no_toggle
+        xor cam_mode, 1
+        mov cam_skip_delta, 1
+        ; entering third person: face where the hero faces
+        vmovss xmm0, hero_dir_x
+        vmovss cam_fwd_x, xmm0
+        vmovss xmm0, hero_dir_z
+        vmovss cam_fwd_z, xmm0
+    no_toggle:
+    ; cursor: hidden and re-centred in third person while the window is active
+    xor ebx, ebx
+    cmp cam_mode, 0
+    je want_set
+    cmp window_active, 0
+    je want_set
+        mov ebx, 1
+    want_set:
+    cmp ebx, cam_cursor_hidden
+    je cursor_ok
+        mov cam_cursor_hidden, ebx
+        mov ecx, ebx
+        xor ecx, 1                     ; ShowCursor(FALSE) to hide
+        call ShowCursor
+        mov cam_skip_delta, 1
+    cursor_ok:
+    test ebx, ebx
+    jz no_look
+        invoke(GetWindowRect, window, cam_wrect&)
+        mov eax, cam_wrect.left
+        add eax, cam_wrect.right
+        sar eax, 1
+        mov ebx, eax                   ; centre x
+        mov eax, cam_wrect.top
+        add eax, cam_wrect.bottom
+        sar eax, 1
+        mov dword ptr [rsp + 64], eax  ; centre y
+        invoke(GetCursorPos, cam_cursor&)
+        mov eax, cam_cursor.x
+        sub eax, ebx                   ; dx
+        cmp cam_skip_delta, 0
+        je use_delta
+            xor eax, eax
+            mov cam_skip_delta, 0
+        use_delta:
+        vcvtsi2ss xmm0, xmm0, eax
+        vmulss xmm0, xmm0, k_look_sens          ; a
+        vmulss xmm1, xmm0, xmm0                 ; a^2
+        vmulss xmm2, xmm1, k_half
+        vmovss xmm3, k_cam_one
+        vsubss xmm2, xmm3, xmm2                 ; c = 1 - a^2/2
+        vmulss xmm1, xmm1, xmm0
+        vmulss xmm1, xmm1, k_sixth
+        vsubss xmm1, xmm0, xmm1                 ; s = a - a^3/6
+        vmovss xmm4, cam_fwd_x
+        vmovss xmm5, cam_fwd_z
+        vmulss xmm6, xmm4, xmm2
+        vmulss xmm7, xmm5, xmm1
+        vaddss xmm6, xmm6, xmm7                 ; fx' = fx*c + fz*s
+        vmulss xmm7, xmm5, xmm2
+        vmulss xmm3, xmm4, xmm1
+        vsubss xmm7, xmm7, xmm3                 ; fz' = fz*c - fx*s
+        vmulss xmm0, xmm6, xmm6
+        vmulss xmm1, xmm7, xmm7
+        vaddss xmm0, xmm0, xmm1
+        vsqrtss xmm0, xmm0, xmm0
+        vdivss xmm6, xmm6, xmm0
+        vdivss xmm7, xmm7, xmm0
+        vmovss cam_fwd_x, xmm6
+        vmovss cam_fwd_z, xmm7
+        mov r8d, dword ptr [rsp + 64]
+        invoke(SetCursorPos, rbx, r8)
+    no_look:
+    ; blend toward the mode
+    vmovss xmm0, cam_blend
+    cmp cam_mode, 0
+    je toward_top
+        vaddss xmm0, xmm0, k_blend_step
+        vminss xmm0, xmm0, k_cam_one
+        jmp blended
+    toward_top:
+        vsubss xmm0, xmm0, k_blend_step
+        vxorps xmm1, xmm1, xmm1
+        vmaxss xmm0, xmm0, xmm1
+    blended:
+    vmovss cam_blend, xmm0
+    ; eased e = t*t*(3 - 2t)
+    vmulss xmm1, xmm0, k_cam_two
+    vmovss xmm2, k_three
+    vsubss xmm2, xmm2, xmm1
+    vmulss xmm1, xmm0, xmm0
+    vmulss xmm6, xmm1, xmm2                     ; e
+    ; top-down eye/target: xmm0..2 eye, xmm3..5 target (x, y, z)
+    vmovss xmm7, cam_zoom
+    vmovss xmm0, hero_x
+    vmulss xmm1, xmm7, cam_height
+    vmulss xmm2, xmm7, cam_back
+    vmovss xmm3, hero_z
+    vsubss xmm2, xmm3, xmm2
+    vmovss xmm3, hero_x
+    vxorps xmm4, xmm4, xmm4
+    vmovss xmm5, cam_ahead
+    vaddss xmm5, xmm5, hero_z
+    vmovss cam_eye[0], xmm0
+    vmovss cam_eye[1], xmm1
+    vmovss cam_eye[2], xmm2
+    vmovss cam_target[0], xmm3
+    vmovss cam_target[1], xmm4
+    vmovss cam_target[2], xmm5
+    ; third-person eye/target, blended in: p = top + (tp - top) * e
+    vmovss xmm0, cam_fwd_x
+    vmulss xmm0, xmm0, k_tp_back
+    vmovss xmm1, hero_x
+    vsubss xmm0, xmm1, xmm0                     ; eye x
+    call blend_eye_x
+    vmovss xmm0, k_tp_height
+    lea rax, cam_eye
+    add rax, 4
+    call blend_into
+    vmovss xmm0, cam_fwd_z
+    vmulss xmm0, xmm0, k_tp_back
+    vmovss xmm1, hero_z
+    vsubss xmm0, xmm1, xmm0                     ; eye z
+    lea rax, cam_eye
+    add rax, 8
+    call blend_into
+    vmovss xmm0, cam_fwd_x
+    vmulss xmm0, xmm0, k_tp_ahead
+    vaddss xmm0, xmm0, hero_x                   ; target x
+    lea rax, cam_target
+    call blend_into
+    vmovss xmm0, k_tp_target_y
+    lea rax, cam_target
+    add rax, 4
+    call blend_into
+    vmovss xmm0, cam_fwd_z
+    vmulss xmm0, xmm0, k_tp_ahead
+    vaddss xmm0, xmm0, hero_z                   ; target z
+    lea rax, cam_target
+    add rax, 8
+    call blend_into
+    ; LOD focus: the hero
+    vmovss xmm0, hero_x
+    vmovss cam_focus_x, xmm0
+    vmovss xmm0, hero_z
+    vmovss cam_focus_z, xmm0
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    add rsp, 80
+    pop rbx
+    ret
+
+blend_eye_x:
+    lea rax, cam_eye
+; rax: a float of the top-down pose, xmm0: the third-person value, xmm6: e
+blend_into:
+    vmovss xmm1, dword ptr [rax]
+    vsubss xmm0, xmm0, xmm1
+    vmulss xmm0, xmm0, xmm6
+    vaddss xmm0, xmm0, xmm1
+    vmovss dword ptr [rax], xmm0
+    ret
+}
+
 ; One frame of camera: zoom from the wheel, follow the hero, matrices, aim, footprint.
 camera_update: proc() = {
     push rbx
@@ -90,22 +279,7 @@ camera_update: proc() = {
     vmaxss xmm0, xmm0, k_zoom_min
     vminss xmm0, xmm0, k_zoom_max
     vmovss cam_zoom, xmm0
-    ; eye and target
-    vmovss xmm1, hero_x
-    vmovss xmm2, hero_z
-    vmovss cam_target[0], xmm1
-    vmovss cam_eye[0], xmm1
-    vmovss xmm3, cam_ahead
-    vaddss xmm3, xmm3, xmm2
-    vmovss cam_target[2], xmm3
-    vmulss xmm3, xmm0, cam_height
-    vmovss cam_eye[1], xmm3
-    vmulss xmm3, xmm0, cam_back
-    vsubss xmm3, xmm2, xmm3
-    vmovss cam_eye[2], xmm3
-    vmovss cam_focus_x, xmm1
-    vmovss xmm3, cam_target[2]
-    vmovss cam_focus_z, xmm3
+    call camera_modes
     ; matrices
     invoke(look_at_lh, cam_view&, cam_eye&, cam_target&, cam_up&)
     mov eax, client_width
@@ -121,7 +295,16 @@ camera_update: proc() = {
     mov rcx, cam_proj&
     call perspective_lh
     invoke(m4_mul, cam_view_proj&, cam_view&, cam_proj&)
-    ; aim: the ground under the mouse
+    ; aim: the screen centre in third person, else the ground under the mouse
+    cmp cam_mode, 0
+    je mouse_aim
+        vxorps xmm0, xmm0, xmm0
+        vmovss xmm1, k_tp_aim_y
+        call camera_ray_ground
+        vmovss aim_x, xmm0
+        vmovss aim_z, xmm1
+        jmp aimed
+    mouse_aim:
     mov eax, mouse_x
     vcvtsi2ss xmm0, xmm0, eax
     mov eax, client_width
@@ -140,6 +323,7 @@ camera_update: proc() = {
     call camera_ray_ground
     vmovss aim_x, xmm0
     vmovss aim_z, xmm1
+    aimed:
     ; footprint corners
     lea rsi, cam_corner_ndc
     lea rbx, cam_corners

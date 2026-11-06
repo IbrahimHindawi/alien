@@ -245,10 +245,16 @@ done:
 ; one tick -------------------------------------------------------------------
 
 ; ecx: keys (W=1 A=2 S=4 D=8)
-sim_hero: proc(keys: u32) = {
-    cmp hero_alive, 0
-    je dead
-    ; ix = D - A, iz = W - S, as -1, 0, 1
+; The hero's move vector for the tick. The simulation takes a vector, so a
+; camera-relative scheme (third person) can supply its own; world-axis keys
+; (top-down, the bench) become one here: ix = D - A, iz = W - S, times DIAG
+; when diagonal. The values, and so the results, are those of SIM 3/4.
+sim_move_x: f32 = 0.0
+sim_move_z: f32 = 0.0
+sim_move_override: u32 = 0             ; 1: the caller set sim_move_x/z itself
+
+; ecx: keys -> sim_move_x/z
+keys_to_move: proc(keys: u32) = {
     xor eax, eax
     xor edx, edx
     bt ecx, 3
@@ -268,6 +274,16 @@ sim_hero: proc(keys: u32) = {
         vmulss xmm0, xmm0, k_diag
         vmulss xmm1, xmm1, k_diag
     straight:
+    vmovss sim_move_x, xmm0
+    vmovss sim_move_z, xmm1
+    ret
+}
+
+sim_hero: proc() = {
+    cmp hero_alive, 0
+    je dead
+    vmovss xmm0, sim_move_x
+    vmovss xmm1, sim_move_z
     vmulss xmm0, xmm0, k_hero_speed
     vmulss xmm0, xmm0, k_dt[0]
     vaddss xmm0, xmm0, hero_x
@@ -593,11 +609,14 @@ sim_step: proc(keys: u32) = {
     sub rsp, 40
     mov esi, ecx
     mov sim_in_keys, ecx
+    cmp sim_move_override, 0
+    jne moved
+        call keys_to_move
+    moved:
     rdtsc
     shl rdx, 32
     or rax, rdx
     mov rbx, rax
-    mov ecx, esi
     call sim_hero
     rdtsc
     shl rdx, 32

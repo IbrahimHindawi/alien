@@ -111,6 +111,18 @@ def main():
     status = 0
     for name in names:
         c, spec, s = conf[name], specs["assets"][name], sel[name]
+        if c.get("rejected"):
+            # reviewed and refused: no VAT ships, the reason goes on record
+            for d in range(3):
+                p = os.path.join(ANIMS, "%s.lod%d.vat" % (name, d))
+                if os.path.exists(p):
+                    os.remove(p)
+            prov = load_json(prov_path, {})
+            prov.setdefault("animations", {})[name] = {"status": "rejected", "reason": c["rejected"],
+                                                       "attempts": c.get("attempts", [])}
+            save_json(prov_path, prov)
+            print("%-10s rejected: %s" % (name, c["rejected"][:90]))
+            continue
         work = os.path.join(CACHE, "work", "%s-%s" % (name, s["task_id"][:8]))
         lods = [mdmlib.load_tris_json(os.path.join(work, "lod%d.json" % d)) for d in range(3)]
         _, xf = mdmlib.normalize_lods(lods, spec)
@@ -135,7 +147,7 @@ def main():
             sys.stderr.write(r.stdout[-3000:] + r.stderr[-3000:])
             raise RuntimeError("bake failed for " + name)
         align = load_json(cfg["lods"][0]["out"] + ".align.json", {})
-        record = {"rig_task": c["rig_task"], "anim_task": c["anim_task"], "rig": c.get("rig"),
+        record = {"status": "baked", "review": c.get("review"), "rig_task": c["rig_task"], "anim_task": c["anim_task"], "rig": c.get("rig"),
                   "presets": c.get("presets"), "alignment": align, "files": {}, "clips": {},
                   "built": datetime.date.today().isoformat(),
                   "licence": "unverified: Tripo output (see licence_research)"}
@@ -153,12 +165,23 @@ def main():
         rep = json.loads(v.stdout) if v.stdout.strip().startswith("{") else {"error": v.stdout + v.stderr}
         record["validation"] = rep
         status |= v.returncode
+        # the precise in-place test, on the bake's own measurement: the body
+        # bone is pinned to its rest X/Z every frame, and the centroid's drift
+        # from frame 0 to the cycle end, before the seam is closed, is ~0
+        for cl, bk in record["clips"].items():
+            if bk["centroid_drift_before_seam_m"] > 0.01 * spec["height"]:
+                print("    - %s: centroid drifts %.3f m over the cycle before the seam is closed: not in place"
+                      % (cl, bk["centroid_drift_before_seam_m"]))
+                status |= 1
         for f, fr in rep.items():
             print("%-22s %s" % (f, "ok" if fr.get("ok") else "FAIL"))
             for cl, m in fr.get("clips", {}).items():
-                print("    %-6s frames %3d  net drift %.4f m (%.2f%% H)  sway %.4f m  seam step ratio %.2f  bob %.3f m" % (
-                    cl, m["frames"], m["net_drift_m"], 100 * m["net_drift_m"] / spec["height"], m["max_sway_m"],
-                    m["seam_step_ratio"], m["bob_m"]))
+                bk = record["clips"].get(cl, {})
+                print("    %-6s frames %3d  body X/Z offset removed (max) %.3f m, root yaw removed (max) %.1f deg; drift before seam %.4f m; "
+                      "mean offset %.4f m, sway %.4f m; seam residual %.4f m, seam step ratio %.2f; bob %.3f m" % (
+                          cl, m["frames"], bk.get("root_travel_removed_m", 0), bk.get("root_yaw_removed_deg", 0),
+                          bk.get("centroid_drift_before_seam_m", 0), m["offset_from_rest_m"], m["max_sway_m"],
+                          bk.get("seam_residual_before_m", 0), m["seam_step_ratio"], m["bob_m"]))
             for p in fr.get("problems", []):
                 print("    - " + p)
         if not a.no_render:

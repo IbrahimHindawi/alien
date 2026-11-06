@@ -5,9 +5,11 @@
 Per file: magic, version, sizes and offsets, vertex count and FNV-1a hash
 equal to the MDM it belongs to (shared/assets/meshes/<same name>.mdm),
 normals unit length and agreeing with the left-handed CCW winding. Per clip:
-in place (the area-weighted surface centroid's X/Z sway from frame 0 stays
-under 6% of the mesh height, and its linear X/Z trend over the loop under
-1%), a seamless loop (the step from the last frame back to frame 0 is at most
+in place (the loop's mean area-weighted surface centroid within 6% of the
+height of the rest pose's (the MDM file's) in X/Z: a guard against travel,
+since a pose can move mass, an arm or a weapon, without the body moving; and the centroid's sway
+about that mean under 6%; root travel itself is removed and measured by the
+bake, before the seam is closed), a seamless loop (the step from the last frame back to frame 0 is at most
 1.5 times the largest step between consecutive frames), and the vertical bob
 reported. Exit 1 on any failure.
 """
@@ -61,9 +63,12 @@ def check(path):
         mdm = open(mdm_path, "rb").read()
         if struct.unpack_from("<I", mdm, 8)[0] != nv:
             problems.append("vertex count %d differs from the MDM's" % nv)
+        mv = [struct.unpack_from("<3f", mdm, 48 + 20 * i) for i in range(struct.unpack_from("<I", mdm, 8)[0])]
+        rest = centroid(mv)
         if fnv1a(mdm) != mhash:
             problems.append("baked for a different MDM file (hash mismatch): re-bake after rebuilding meshes")
     height = None
+    rest = locals().get("rest")
     for c in range(nclips):
         o = 32 + 64 * c
         if o + 64 > len(data):
@@ -106,27 +111,24 @@ def check(path):
             problems.append("%s: %d normals not unit length" % (name, bad_len))
         if bad_wind > 0.02 * nv / 3:  # quantised slivers may flip; more than 2% is an error
             problems.append("%s: %d normals disagree with the winding" % (name, bad_wind))
-        # in place
+        # in place: the loop's mean centroid stays over the rest pose's (the
+        # MDM file's), and the centroid sways about that mean only a little
         cs = [centroid(fr) for fr in frames]
-        sway = max(math.hypot(c[0] - cs[0][0], c[2] - cs[0][2]) for c in cs)
-        n = len(cs)
-        mx = (n - 1) / 2
-        den = sum((i - mx) ** 2 for i in range(n)) or 1
-        slope_x = sum((i - mx) * c[0] for i, c in enumerate(cs)) / den
-        slope_z = sum((i - mx) * c[2] for i, c in enumerate(cs)) / den
-        trend = math.hypot(slope_x, slope_z) * n
+        mean = [sum(c[k] for c in cs) / len(cs) for k in range(3)]
+        sway = max(math.hypot(c[0] - mean[0], c[2] - mean[2]) for c in cs)
+        trend = math.hypot(mean[0] - rest[0], mean[2] - rest[2]) if rest else 0.0
         bob = max(c[1] for c in cs) - min(c[1] for c in cs)
         steps = [max(math.dist(p, q) for p, q in zip(frames[i], frames[i + 1])) for i in range(nf - 1)]
         seam = max(math.dist(p, q) for p, q in zip(frames[-1], frames[0]))
         ratio = seam / (max(steps) or 1e-9)
         info["clips"][name] = {"frames": nf, "fps": round(fps, 3), "max_sway_m": round(sway, 4),
-                               "net_drift_m": round(trend, 4), "bob_m": round(bob, 4),
+                               "offset_from_rest_m": round(trend, 4), "bob_m": round(bob, 4),
                                "seam_step_m": round(seam, 4), "max_step_m": round(max(steps), 4),
                                "seam_step_ratio": round(ratio, 3)}
         if sway > 0.06 * height:
             problems.append("%s: centroid sways %.3f m (> 6%% of %.2f m): not in place" % (name, sway, height))
-        if trend > 0.01 * height:
-            problems.append("%s: centroid drifts %.3f m over the loop: not in place" % (name, trend))
+        if trend > 0.06 * height:
+            problems.append("%s: the loop's mean centroid is %.3f m off the rest pose's: not in place" % (name, trend))
         if flags & 1 and ratio > 1.5:
             problems.append("%s: loop seam step %.4f m is %.2fx the largest frame step" % (name, seam, ratio))
     info["height"] = height

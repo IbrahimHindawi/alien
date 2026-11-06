@@ -522,6 +522,14 @@ next:
         jmp advance
     not_bench:
     mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--third")
+    test eax, eax
+    jz not_third
+        mov cam_mode, 1
+        mov cam_blend, 0x3F800000      ; 1.0: start fully in third person
+        jmp advance
+    not_third:
+    mov rcx, [rsi + rdi*8]
     invoke(string_equal, rcx, "--hidden")
     test eax, eax
     jz not_hidden

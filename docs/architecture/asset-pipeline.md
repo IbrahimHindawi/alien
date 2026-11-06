@@ -54,10 +54,20 @@ while Tripo keeps the task) and the committed `.mdm` files stay authoritative.
    LOD0: the target height, the surface centroid over the origin, the lowest
    point on the ground (the Seeker: the body centre at hover height).
    Flat shaded, three vertices per triangle, face normals, CCW from outside.
-6. **Validate** (`verify_mdm.py`, stdlib, shares no code with the writer).
+   The pipeline works right-handed (Blender's convention, +X the model's
+   left); the file is left-handed as D3D (+X the model's right): `to_file`
+   negates X on positions and normals and keeps the index order, which keeps
+   triangles CCW seen from outside in left-handed space. Files written
+   before 2026-11-06 (commit 8228a15) were mirrored.
+6. **Validate** (`verify_mdm.py`, stdlib, shares no code with the writer;
+   it reads the triangle budgets from `shared/specs/mesh_format.md` itself,
+   checks the winding for left-handed space, and that no body vertex carries
+   anim weight).
 7. **Preview** (`blender_render.py`): the `.mdm` files themselves are
    rendered (Workbench, flat, vertex colour), front, side, top and 3/4, into
-   `shared/assets/previews/<name>.lod<N>.png` and `<name>.png` (all LODs).
+   `shared/assets/previews/<name>.lod<N>.png` and `<name>.png` (all LODs),
+   and `<name>.distance.png`: each LOD shrunk until the model is about 50 px
+   tall, as a unit is on screen in play, then enlarged 4x pixel for pixel.
 8. **Provenance** (`shared/assets/provenance.json`): source, prompt, model
    version, task id, every processing step, triangle counts, all attempts
    with their verdicts, and the licence finding (`licence.json`).
@@ -72,7 +82,12 @@ of that region, about 1.2% of the surface (the eyes, the visor, the lens).
 Those faces get the archetype's glow colour and alpha 255; nothing else has
 alpha.
 
-Anim weights come from `anim` in the spec. `legs` (Scuttler, Stalker,
+Anim weights come from `anim` in the spec. Animation is in place
+(mesh_format.md): the engine moves weighted vertices only, so the body must
+carry weight 0. The rules guarantee it (weights only below `leg_top` and
+outside `radial_min`, or only on the fins and ring), the validator checks
+the files for it, and a weights render (`blender_render.py --weights`)
+shows it: bodies black, limbs graded to white. `legs` (Scuttler, Stalker,
 Colossus): weight = a height ramp, 1 at the ground to 0 at `leg_top` of the
 height, times a radial ramp from the vertical axis (so the belly stays
 rigid). `radial` (Seeker): 0 inside `radial_min` of the body radius, 1
@@ -91,19 +106,39 @@ See `licence.json`: Tripo's terms give commercial rights to paid users only;
 the account tier could not be determined from the API, so Tripo-sourced
 meshes are marked `unverified`.
 
-## Current assets (2026-11-06)
+## Baked animation (VAT)
+
+`build_anims.py` (with `tripo_anim.py`, `blender_bake.py`, `verify_vat.py`)
+rigs and animates through Tripo, bakes the clips onto our LOD0 and LOD1
+meshes and writes VAT1 files (`docs/architecture/vat-format.md`) to
+`shared/assets/anims/`, with contact sheets in
+`shared/assets/previews/anims/`. Tripo endpoints (v3): `POST
+/animations/rig-check` (free), `POST /animations/rig` (25 credits), `POST
+/animations/retarget` (10 credits per preset). Presets: bipeds get idle,
+walk, run and more; quadruped, hexapod and octopod only a walk; nothing
+else animates. `animations.json` records which tasks are baked and which
+were rejected and why.
+
+    python tools/asset-pipeline/build_anims.py
+
+## Current assets (2026-11-06, budgets v2)
 
 | asset | source | LOD0 / LOD1 / LOD2 triangles |
 |---|---|---|
-| scuttler | Tripo P1, attempt 2 of 3 | 246 / 112 / 40 |
-| stalker | Tripo P1, attempt 2 | 745 / 300 / 80 |
-| seeker | Tripo P1, attempt 3 of 3 | 388 / 190 / 60 |
-| colossus | Tripo P1, attempt 2 | 2982 / 1000 / 300 |
-| hero | Tripo P1, attempt 2 | 2443 / 887 / 291 |
-| monolith | Tripo P1, attempt 1 | 1411 / 494 / 150 |
-| pylon | Tripo P1, attempt 1 | 668 / 432 / 150 |
-| rock_spire | Tripo P1, attempt 1 | 948 / 346 / 150 |
-| hive_spire | Tripo P1, attempt 1 | 1356 / 483 / 150 |
+| scuttler | Tripo P1, attempt 2 of 3 | 114 / 60 / 24 |
+| stalker | Tripo P1, attempt 2 | 396 / 160 / 60 |
+| seeker | Tripo P1, attempt 3 of 3 | 246 / 96 / 40 |
+| colossus | Tripo P1, attempt 2 | 1498 / 599 / 199 |
+| hero | Tripo P1, attempt 2 | 1467 / 589 / 187 |
+| monolith | Tripo P1, attempt 1 | 794 / 293 / 98 |
+| pylon | Tripo P1, attempt 1 | 668 / 300 / 100 |
+| rock_spire | Tripo P1, attempt 1 | 468 / 272 / 100 |
+| hive_spire | Tripo P1, attempt 1 | 757 / 293 / 100 |
+
+All rebuilt from the cached downloads; no regeneration was needed for the
+halved budgets. The seeker's LOD2 ring, at 40 triangles, collapses to about
+five segments and is 13% shorter than LOD0; that is a reviewed exception
+(`lod_height_tolerance` in assets.json).
 
 The reasons for every rejection and acceptance are in `attempts.json` and in
 `shared/assets/provenance.json`. Known deviations: the scuttler has eight

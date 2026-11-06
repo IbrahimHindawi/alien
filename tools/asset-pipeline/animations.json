@@ -1,0 +1,112 @@
+{
+  "hero": {
+    "rig": {
+      "rig_type": "biped",
+      "model": "v3.0-20260909"
+    },
+    "rig_task": "dfd5380f-7ad9-43d8-9050-e5e2956bb5d5",
+    "anim_task": "59581785-952d-49f4-ada0-b0db08cc1fac",
+    "presets": [
+      "preset:idle",
+      "preset:run",
+      "preset:walk"
+    ],
+    "clips": [
+      {
+        "name": "run",
+        "action": "run",
+        "frames": 20
+      },
+      {
+        "name": "idle",
+        "action": "idle",
+        "frames": 48
+      },
+      {
+        "name": "walk",
+        "action": "walk",
+        "frames": 28
+      }
+    ],
+    "review": "run, walk, idle in place and seamless; flaw: Tripo's skinning ties the rifle to the right arm, so in the run it swings with the arm instead of being held"
+  },
+  "stalker": {
+    "rig": {
+      "rig_type": "biped",
+      "model": "v3.0-20260909"
+    },
+    "rig_task": "b8b6d893-a3ef-4798-992b-f5102a7d71bf",
+    "anim_task": "16071fa0-6806-4e0d-bdf8-db8d2f5dbe6e",
+    "presets": [
+      "preset:walk",
+      "preset:run"
+    ],
+    "clips": [
+      {
+        "name": "walk",
+        "action": "walk",
+        "frames": 28
+      },
+      {
+        "name": "run",
+        "action": "run",
+        "frames": 20
+      }
+    ],
+    "review": "walk and run read well: an upright stride with the scythe blades swinging, and a forward-leaning sprint"
+  },
+  "colossus": {
+    "rig": {
+      "rig_type": "quadruped",
+      "model": "v2.5-20260210",
+      "note": "rig-check recommended biped; forced quadruped"
+    },
+    "rig_task": "50ca3f83-8188-4842-a445-c3cfe3491a3f",
+    "anim_task": "dda78e88-1d8a-4a13-8b7a-2d5a1bf03962",
+    "presets": [
+      "preset:quadruped:walk"
+    ],
+    "clips": [
+      {
+        "name": "walk",
+        "action": "preset:quadruped:walk",
+        "frames": 30
+      }
+    ],
+    "rejected": "Tripo's quadruped auto-rig (v2.5-20260210, two rigs: 2cd317e8 and 50ca3f83) does not fit this body: the first walk yawed the body and crumpled the legs, the second stretches a front leg into a smeared slab every step; Tripo's own skinned mesh shows the same tearing, so it is the rig, not the weight transfer. No VAT is shipped; the procedural leg animation stays.",
+    "attempts": [
+      {
+        "rig_task": "2cd317e8-2658-459a-bbe0-60905733be44",
+        "anim_task": "4ccbf0e2-adc1-4e1d-921a-b809b3f23bf7",
+        "verdict": "rejected: body yaws, legs crumple"
+      },
+      {
+        "rig_task": "50ca3f83-8188-4842-a445-c3cfe3491a3f",
+        "anim_task": "dda78e88-1d8a-4a13-8b7a-2d5a1bf03962",
+        "verdict": "rejected: a front leg stretches into a slab"
+      }
+    ]
+  },
+  "scuttler": {
+    "rig": {
+      "rig_type": "hexapod",
+      "model": "v2.5-20260210"
+    },
+    "rig_task": "035093b2-01a0-49a0-bd8b-e402f7e406f5",
+    "anim_task": "6dd3abc2-c4cf-4308-97d8-5a7ec0ed622c",
+    "presets": [
+      "preset:hexapod:walk"
+    ],
+    "clips": [
+      {
+        "name": "walk",
+        "action": "preset:hexapod:walk",
+        "frames": 30
+      }
+    ],
+    "review": "hexapod walk: the legs step, the body stays put; the eye faces shimmer slightly; the tick has eight legs, the hexapod rig drives six of them"
+  },
+  "seeker": {
+    "rejected": "Tripo rig-check (free) says the seeker is not riggable (riggable false, rig_type others), and the API has no hover or idle preset for non-biped rigs. No VAT; the procedural ring/fin animation stays."
+  }
+}

@@ -330,6 +330,17 @@ simulate:
         call run_escalate
     fixed_population:
     call hero_read_keys
+    mov sim_move_override, 0
+    cmp cam_mode, 0
+    je world_axes
+        mov ecx, eax
+        push rax
+        sub rsp, 8
+        call camera_relative_move
+        add rsp, 8
+        pop rax
+        mov sim_move_override, 1
+    world_axes:
     or eax, FIRE_BIT                   ; the primary weapon is automatic
     mov ecx, eax
     vmovss xmm0, aim_x

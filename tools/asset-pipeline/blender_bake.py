@@ -136,10 +136,26 @@ if arm.animation_data:
 arm.data.pose_position = "POSE"
 
 
+def descendants(b):
+    return sum(1 + descendants(c) for c in b.children)
+
+
+# the body bone carries the body: for a biped the hip, for a quadruped the
+# spine; for a rig whose root's children are all limbs, the root itself
+kids = sorted(root.children, key=descendants, reverse=True)
+body = kids[0] if kids and descendants(kids[0]) > 0.5 * descendants(root) else root
+arm.data.pose_position = "REST"
+bpy.context.view_layer.update()
+body_rest = (arm.matrix_world @ body.matrix).translation.copy()
+_ry = (arm.matrix_world @ root.matrix).to_3x3() @ Vector((0, 1, 0))
+root_rest_yaw = math.atan2(_ry.y, _ry.x)
+arm.data.pose_position = "POSE"
+
+
 def root_state():
-    m = arm.matrix_world @ root.matrix
-    h = m.translation
-    y = m.to_3x3() @ Vector((0, 1, 0))
+    """The body bone's horizontal position and the root bone's yaw."""
+    h = (arm.matrix_world @ body.matrix).translation
+    y = (arm.matrix_world @ root.matrix).to_3x3() @ Vector((0, 1, 0))
     return Vector((h.x, h.y, 0.0)), math.atan2(y.y, y.x)
 
 
@@ -164,6 +180,27 @@ results = [{"clips": []} for _ in lods]
 for clip in cfg["clips"]:
     act = set_action(clip["action"])
     f0, f1 = act.frame_range
+    # the loop: the action range need not be exactly one cycle (a run may
+    # start from a different pose). Sample the clip on the smallest LOD every
+    # half frame, the range end included, and take the pair of times at least
+    # 35% of the range apart whose poses match best: that is the cycle.
+    probe = lods[-1][0]
+    ts, t = [], f0
+    while t < f1 - 1e-6:
+        ts.append(t)
+        t += 0.5
+    ts.append(f1)
+    ps_all = [eval_positions(probe, t) for t in ts]
+    best = None
+    for i in range(len(ts)):
+        for j in range(i + 1, len(ts)):
+            if ts[j] - ts[i] < 0.35 * (f1 - f0):
+                continue
+            d = max((p - q).length for p, q in zip(ps_all[i], ps_all[j]))
+            if best is None or d < best[0] - 1e-9:
+                best = (d, ts[i], ts[j])
+    loop_note = {"action_range": [f0, f1], "cycle": [best[1], best[2]], "cycle_pose_error_rig_units": best[0]}
+    f0, f1 = best[1], best[2]
     n = clip["frames"]
     fps = scene.render.fps / scene.render.fps_base
     dur = (f1 - f0) / fps
@@ -172,7 +209,10 @@ for clip in cfg["clips"]:
     for t in times:
         scene.frame_set(int(math.floor(t)), subframe=t - math.floor(t))
         roots.append(root_state())
-    h0, a0 = roots[0]
+    # in place against the REST pose: the body bone is put back over its rest
+    # position on X/Z every frame (vertical bob kept), and the root's yaw
+    # back to its rest heading
+    h0, a0 = Vector((body_rest.x, body_rest.y, 0.0)), root_rest_yaw
     travel = max((h - h0).length for h, a in roots)
     yaw_dev = max(abs(math.remainder(a - a0, 2 * math.pi)) for h, a in roots)
     for li, (ob, verts0, cols) in enumerate(lods):
@@ -183,6 +223,16 @@ for clip in cfg["clips"]:
             r = Matrix.Rotation(-(a - a0), 3, "Z")
             ps = [r @ (p - h) + h0 for p in ps]
             frames.append([world_to_file(p) for p in ps])
+        def cxz(fr):
+            a_sum = cx = cz = 0.0
+            for t in range(0, len(fr), 3):
+                a, b, c = (Vector(fr[t]), Vector(fr[t + 1]), Vector(fr[t + 2]))
+                ar = (b - a).cross(c - a).length / 2
+                m = (a + b + c) / 3
+                a_sum, cx, cz = a_sum + ar, cx + ar * m.x, cz + ar * m.z
+            return (cx / a_sum, cz / a_sum)
+        c0, c1 = cxz(frames[0]), cxz(frames[-1])
+        drift_before = math.hypot(c1[0] - c0[0], c1[1] - c0[1])
         # seamless: spread the residual between the loop end and frame 0
         end, start = frames[-1], frames[0]
         resid = [tuple(s[k] - e[k] for k in range(3)) for s, e in zip(start, end)]
@@ -193,8 +243,9 @@ for clip in cfg["clips"]:
             out.append([[p[0] + d[0] * k, p[1] + d[1] * k, p[2] + d[2] * k] for p, d in zip(fr, resid)])
         results[li]["clips"].append({
             "name": clip["name"], "action": clip["action"], "frames": out, "fps": n / dur, "duration": dur,
-            "source_frames": [f0, f1], "root_bone": root.name, "root_travel_removed_m": travel / align_scale * S,
-            "root_yaw_removed_deg": math.degrees(yaw_dev), "seam_residual_before_m": seam_before})
+            "source_frames": [f0, f1], "root_bone": root.name, "body_bone": body.name, "root_travel_removed_m": travel / align_scale * S,
+            "root_yaw_removed_deg": math.degrees(yaw_dev), "seam_residual_before_m": seam_before,
+            "centroid_drift_before_seam_m": drift_before, "loop": loop_note})
         # contact-sheet renders (LOD0)
         if li == 0 and cfg.get("renders"):
             cols0 = cols
