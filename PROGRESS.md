@@ -21,29 +21,34 @@ reports with a stack scan (`python tools/symbolize.py <rva>`),
 
 | milestone | state |
 |---|---|
-| 1 toolchain and foundations | done: rasm verified (D3D11 example builds and runs), arena, platform, renderer |
-| 2 first million | done: 1M entities simulated and rendered (AVX2 culling, 3 LODs, instancing) |
-| 3 swarm simulation | done: grid counting sort, capped separation, pursuit, integration; bit-exact with a Python model |
-| 4 playable hero | mostly: WASD, mouse aim, automatic piercing weapon, damage, death, restart, escalating runs, top-down and third-person cameras with V blending. Missing: HUD (stats are in the title bar), camera obstruction handling (no obstacles exist yet) |
-| 5 cybernetic aliens | assets done (Tripo, reviewed, 3 LODs, v2 budgets); only scuttlers are in the simulation |
-| 6 combat spectacle | not started: dash, gravity pulse, beam, bombardment, explosions, progression |
-| 7 optimisation | started: separation 2.7x (see docs/performance/log.md). Threads not started |
-| 8 polish | not started: ground/sky look, audio, UI, menus, settings, saves |
+| 1 toolchain and foundations | done: rasm verified, arena, platform, renderer, crash reporter |
+| 2 first million | done: 1M simulated and rendered; a 1M stress frame is 5.7 ms (175 FPS) on 16 threads |
+| 3 swarm simulation | done: grid counting sort, capped separation, pursuit; bit-exact with the Python model at any thread count |
+| 4 playable hero | done: WASD, mouse aim, automatic piercing weapon, damage, death, restart, escalating runs, top-down and third-person cameras (V), HUD. Camera obstruction waits for obstacles |
+| 5 cybernetic aliens | assets done (Tripo, reviewed, 3 LODs, halved budgets, 6 in-place baked clips); only scuttlers are simulated; baked clips not yet played (VAT) |
+| 6 combat spectacle | mostly: dash (invulnerable), expanding gravity pulse, energy beam, orbital bombardment, death shards. Missing: upgrades and progression |
+| 7 optimisation | in progress: separation 2.7x, threads 2.8x more (docs/performance/log.md) |
+| 8 polish | started: HUD and performance overlay. Missing: ground/sky look, audio, menus, settings, saves |
+
+Controls: WASD move, mouse aim (fire is automatic), Space dash, right mouse
+or Q gravity pulse, hold E beam, F orbital strike, V camera, wheel zoom, R
+restart, Esc quit. `--autoplay` plays the bench input schedule.
 
 Commercial release gates: none passed. Gate 1 (fun prototype) needs the
 abilities and real playtesting; nothing here has been played by anyone
 outside this session. Steam items (Steamworks, store assets, account) are
 untouched and partly need the author.
 
-## Simulation performance (single thread, Ryzen 9 9950X3D)
+## Simulation performance (Ryzen 9 9950X3D)
 
-| entities | us per tick | grid | separate | integrate (cycles/entity) |
-|---|---|---|---|---|
-| 100k | 1353 | 19.4 | 36.7 | 1.9 |
-| 1M | 17188 | 33.0 | 37.9 | 2.8 |
+| entities | threads | us per tick |
+|---|---|---|
+| 100k | 1 | 1375 |
+| 1M | 1 | 14472 |
+| 100k | 16 | 695 |
+| 1M | 16 | 5130 |
 
-These were measured at SIM 3. A 1M stress frame is ~36 ms before the
-separation change. Everything runs every tick for every entity; nothing is
+SIM 4/5 rules (combat and abilities included). Everything runs every tick for every entity; nothing is
 approximated or skipped (sim_spec.md section 7).
 
 ## Open issues
