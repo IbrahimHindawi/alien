@@ -1,0 +1,233 @@
+; renderer/particles.rasm: death shards (presentation only)
+;
+; sim_compact appends the position of every alien that dies to death_events
+; (an output of the simulation, not part of its state or hash). Each frame
+; the events become PER_DEATH shards in a ring buffer of PART_MAX, with
+; velocities from a render-side random stream (never the simulation's), then
+; every shard falls, spins down and fades over its life. Live shards are
+; written as float4(x, y, z, scale) instances and drawn with vs_particle.
+
+#define PART_MAX 65536
+#define PART_MASK 65535
+#define PER_DEATH 6
+#define DEATH_EVENTS_MAX 8192
+
+death_count: u32 = 0
+death_x: [DEATH_EVENTS_MAX]f32 = {}
+death_z: [DEATH_EVENTS_MAX]f32 = {}
+
+part_x: [PART_MAX]f32[align(32)] = {}
+part_y: [PART_MAX]f32[align(32)] = {}
+part_z: [PART_MAX]f32[align(32)] = {}
+part_vx: [PART_MAX]f32[align(32)] = {}
+part_vy: [PART_MAX]f32[align(32)] = {}
+part_vz: [PART_MAX]f32[align(32)] = {}
+part_life: [PART_MAX]f32[align(32)] = {}
+part_head: u32 = 0
+part_rng: u32 = 0x9E3779B9
+part_count: u32 = 0
+part_buffer: *ID3D11Buffer = {}
+shard_mesh: Mesh = {}
+vs_particle: *ID3D11VertexShader = {}
+part_desc: D3D11_BUFFER_DESC = {
+    .ByteWidth = PART_MAX * INSTANCE_BYTES,
+    .Usage = D3D11_USAGE.D3D11_USAGE_DYNAMIC,
+    .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
+    .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
+}
+k_part_dt: f32 = 0.016666668
+k_part_gravity: const f32 = 22.0
+k_part_life_half: const f32 = 0.35
+k_part_speed: const f32 = 7.0
+k_part_up: const f32 = 5.0
+k_part_up_span: const f32 = 6.0
+k_part_scale: const f32 = 0.22
+k_part_y0: const f32 = 0.35
+k_rng_unit: const f32 = 2.3283064e-10 ; 2^-32
+k_rng_two: const f32 = 2.0
+k_rng_one: const f32 = 1.0
+k_part_zero: const f32 = 0.0
+
+; -> xmm0: a render-side random number in [0, 1) (xorshift32)
+part_random: proc() = {
+    mov eax, part_rng
+    mov edx, eax
+    shl edx, 13
+    xor eax, edx
+    mov edx, eax
+    shr edx, 17
+    xor eax, edx
+    mov edx, eax
+    shl edx, 5
+    xor eax, edx
+    mov part_rng, eax
+    mov eax, eax
+    vcvtsi2ss xmm0, xmm0, rax
+    vmulss xmm0, xmm0, k_rng_unit
+    ret
+}
+
+; Turn this frame's death events into shards.
+particles_spawn: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 64                        ; 8 + 24 + 64 = 96; xmm6, xmm7 at [rsp + 32], [rsp + 48]
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    xor esi, esi
+event:
+    cmp esi, death_count
+    jae done
+    lea rax, death_x
+    vmovss xmm6, dword ptr [rax + rsi*4]
+    lea rax, death_z
+    vmovss xmm7, dword ptr [rax + rsi*4]
+    mov edi, PER_DEATH
+shard:
+    mov ebx, part_head
+    and ebx, PART_MASK
+    inc part_head
+    lea rax, part_x
+    vmovss dword ptr [rax + rbx*4], xmm6
+    lea rax, part_z
+    vmovss dword ptr [rax + rbx*4], xmm7
+    lea rax, part_y
+    vmovss xmm0, k_part_y0
+    vmovss dword ptr [rax + rbx*4], xmm0
+    call part_random                   ; vx in [-speed, speed)
+    vmulss xmm0, xmm0, k_rng_two
+    vsubss xmm0, xmm0, k_rng_one
+    vmulss xmm0, xmm0, k_part_speed
+    lea rax, part_vx
+    vmovss dword ptr [rax + rbx*4], xmm0
+    call part_random
+    vmulss xmm0, xmm0, k_rng_two
+    vsubss xmm0, xmm0, k_rng_one
+    vmulss xmm0, xmm0, k_part_speed
+    lea rax, part_vz
+    vmovss dword ptr [rax + rbx*4], xmm0
+    call part_random                   ; vy in [up, up + span)
+    vmulss xmm0, xmm0, k_part_up_span
+    vaddss xmm0, xmm0, k_part_up
+    lea rax, part_vy
+    vmovss dword ptr [rax + rbx*4], xmm0
+    call part_random                   ; life in [LIFE/2, LIFE)
+    vmulss xmm0, xmm0, k_part_life_half
+    vaddss xmm0, xmm0, k_part_life_half
+    lea rax, part_life
+    vmovss dword ptr [rax + rbx*4], xmm0
+    dec edi
+    jnz shard
+    inc esi
+    jmp event
+done:
+    mov death_count, 0
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    add rsp, 64
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; Step every shard by k_part_dt (8 at a time) and write the live ones as instances.
+particles_update: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 72                        ; 8 + 16 + 72 = 96
+    vcall(context, ID3D11DeviceContextVtbl.Map, part_buffer, 0, D3D11_MAP.D3D11_MAP_WRITE_DISCARD, 0, mapped&)
+    test eax, eax
+    js failed
+    mov rdx, mapped.pData
+    mov rsi, rdx
+    vbroadcastss ymm5, k_part_dt
+    vbroadcastss ymm4, k_part_gravity
+    vmulps ymm4, ymm4, ymm5            ; gravity * dt
+    vxorps ymm3, ymm3, ymm3
+    lea r8, part_x
+    lea r9, part_y
+    lea r10, part_z
+    lea r11, part_life
+    xor ecx, ecx
+block:
+    vmovaps ymm0, ymmword ptr [r11 + rcx*4]
+    vcmpps ymm1, ymm0, ymm3, 30        ; life > 0
+    vmovmskps ebx, ymm1
+    test ebx, ebx
+    jz next
+    vsubps ymm0, ymm0, ymm5
+    vmovaps ymmword ptr [r11 + rcx*4], ymm0
+    lea rax, part_vy
+    vmovaps ymm1, ymmword ptr [rax + rcx*4]
+    vsubps ymm1, ymm1, ymm4
+    vmovaps ymmword ptr [rax + rcx*4], ymm1
+    vmulps ymm1, ymm1, ymm5
+    vaddps ymm1, ymm1, ymmword ptr [r9 + rcx*4]
+    vmaxps ymm1, ymm1, ymm3            ; the ground stops them
+    vmovaps ymmword ptr [r9 + rcx*4], ymm1
+    lea rax, part_vx
+    vmovaps ymm1, ymmword ptr [rax + rcx*4]
+    vmulps ymm1, ymm1, ymm5
+    vaddps ymm1, ymm1, ymmword ptr [r8 + rcx*4]
+    vmovaps ymmword ptr [r8 + rcx*4], ymm1
+    lea rax, part_vz
+    vmovaps ymm1, ymmword ptr [rax + rcx*4]
+    vmulps ymm1, ymm1, ymm5
+    vaddps ymm1, ymm1, ymmword ptr [r10 + rcx*4]
+    vmovaps ymmword ptr [r10 + rcx*4], ymm1
+    ; instances for the lanes still alive: scale = life * SCALE / LIFE-ish
+    vcmpps ymm1, ymm0, ymm3, 30
+    vmovmskps ebx, ymm1
+lane:
+    test ebx, ebx
+    jz next
+    tzcnt eax, ebx
+    blsr ebx, ebx
+    add eax, ecx
+    vmovss xmm0, dword ptr [r8 + rax*4]
+    vinsertps xmm0, xmm0, dword ptr [r9 + rax*4], 0x10
+    vinsertps xmm0, xmm0, dword ptr [r10 + rax*4], 0x20
+    vmovss xmm1, dword ptr [r11 + rax*4]
+    vmulss xmm1, xmm1, k_part_scale
+    vinsertps xmm0, xmm0, xmm1, 0x30
+    vmovntps xmmword ptr [rdx], xmm0
+    add rdx, 16
+    jmp lane
+next:
+    add ecx, 8
+    cmp ecx, PART_MAX
+    jb block
+    sfence
+    vzeroupper
+    mov rax, rdx
+    sub rax, rsi
+    shr rax, 4
+    mov part_count, eax
+    vcall(context, ID3D11DeviceContextVtbl.Unmap, part_buffer, 0)
+failed:
+    add rsp, 72
+    pop rsi
+    pop rbx
+    ret
+}
+
+render_particles: proc() = {
+    sub rsp, 56
+    call particles_spawn
+    call particles_update
+    mov eax, part_count
+    test eax, eax
+    jz done
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_particle, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, shard_mesh.vb&, mesh_stride&, mesh_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 1, 1, part_buffer&, instance_stride&, instance_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetIndexBuffer, shard_mesh.ib, DXGI_FORMAT.DXGI_FORMAT_R32_UINT, 0)
+    mov eax, shard_mesh.index_count
+    mov r8d, part_count
+    vcall(context, ID3D11DeviceContextVtbl.DrawIndexedInstanced, rax, r8, 0, 0, 0)
+done:
+    add rsp, 56
+    ret
+}

@@ -64,6 +64,18 @@ VsOut vs_unit(VsMesh v, float4 inst : INSTANCE, uint id : SV_InstanceID)
     return o;
 }
 
+// Particles: slot 1 is float4(x, y, z, scale); the mesh is centred on its origin.
+VsOut vs_particle(VsMesh v, float4 inst : INSTANCE)
+{
+    float3 wp = v.pos * inst.w + inst.xyz;
+    VsOut o;
+    o.clip = mul(float4(wp, 1.0), view_proj);
+    o.world = wp;
+    o.normal = v.normal.xyz;
+    o.color = v.color;
+    return o;
+}
+
 VsOut vs_hero(VsMesh v)
 {
     float4 wp = mul(float4(v.pos, 1.0), hero_world);

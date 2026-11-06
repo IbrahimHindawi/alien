@@ -390,6 +390,16 @@ instance:
     invoke(mesh_load, "assets\\fixtures\\bolt.mdm", bolt_mesh&)
     test eax, eax
     jz failed
+    invoke(mesh_load, "assets\\fixtures\\shard.mdm", shard_mesh&)
+    test eax, eax
+    jz failed
+    vcall(device, ID3D11DeviceVtbl.CreateBuffer, part_desc&, 0, part_buffer&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\particle_vs.cso")
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rax, render_shader_size, 0, vs_particle&)
+    test eax, eax
+    js failed
     invoke(mesh_load, "assets\\fixtures\\bolt_red.mdm", bolt_red_mesh&)
     test eax, eax
     jz failed
@@ -735,6 +745,7 @@ next_lod:
 
     ; projectiles: the unit pipeline with the bolt mesh
     call render_fx
+    call render_particles
     ; hero
     cmp hero_alive, 0
     je no_hero

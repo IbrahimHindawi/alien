@@ -93,6 +93,20 @@ def build_bolt(glow=(0x3F, 0xE6, 0xFF, 255)):
     return v
 
 
+def build_shard():
+    """A death shard: a small octahedron about its origin, orange glow on top, graphite below."""
+    v = []
+    glow, dark = (0xFF, 0x8A, 0x2A, 255), (0x4A, 0x50, 0x58, 0)
+    top, bot = (0.0, 1.0, 0.0), (0.0, -1.0, 0.0)
+    ring = [(1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0), (0.0, 0.0, -1.0)]
+    for k in range(4):
+        a, b = ring[k], ring[(k + 1) % 4]
+        tri(v, top, a, b, glow)    # counter-clockwise seen from outside, in left-handed space
+        tri(v, bot, b, a, dark)
+    return v
+
+
 if __name__ == '__main__':
     write(ROOT / 'shared/fixtures/bolt.mdm', build_bolt())
     write(ROOT / 'shared/fixtures/bolt_red.mdm', build_bolt((0xFF, 0x2E, 0x3A, 255)))
+    write(ROOT / 'shared/fixtures/shard.mdm', build_shard())
