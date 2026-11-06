@@ -112,6 +112,8 @@ camera_modes: proc() = {
     no_toggle:
     ; cursor: hidden and re-centred in third person while the window is active
     xor ebx, ebx
+    cmp opt_autoplay, 0
+    jne want_set                       ; autoplay never takes the mouse
     cmp cam_mode, 0
     je want_set
     cmp window_active, 0

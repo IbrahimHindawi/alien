@@ -310,6 +310,8 @@ sim_contact: proc() = {
     je done
     cmp dash_ticks, 0
     jne done                           ; dashing: invulnerable
+    cmp opt_god, 0
+    jne done                           ; --god (recordings): never set in tests or benches
     mov r12, sim_sorted_id
     mov r13, sim_cell_start
     mov r14, sim_pos_x

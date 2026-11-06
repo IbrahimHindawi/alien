@@ -767,12 +767,30 @@ next_lod:
     no_hero:
     call hud_draw
 
+    ; --record dir: every second frame as dir/fNNNNN.bmp (30 fps of 60 Hz ticks)
+    cmp opt_record, 0
+    je no_record
+    test frame_index, 1
+    jnz no_record
+        mov eax, frame_index
+        shr eax, 1
+        mov r9, rax
+        mov r8, opt_record
+        lea rdx, record_fmt
+        lea rcx, record_path
+        call wsprintfA
+        lea rax, record_path
+        mov capture_target, rax
+        call render_capture
+    no_record:
     cmp opt_capture, 0
     je no_capture
     mov eax, opt_frames
     dec eax
     cmp eax, frame_index
     jne no_capture
+        mov rax, opt_capture
+        mov capture_target, rax
         call render_capture
     no_capture:
     mov eax, opt_vsync
@@ -786,6 +804,9 @@ next_lod:
 ; capture ----------------------------------------------------------------------
 
 bmp_header: [54]u8 = {}
+capture_target: *u8 = 0
+record_path: [512]u8 = {}
+record_fmt: [16]const u8 = "%s\\f%05u.bmp"
 bmp_file: *void = {}
 bmp_written: u32 = 0
 
@@ -821,7 +842,7 @@ render_capture: proc() = {
     mov word ptr [rdi + 28], 32
     mov dword ptr [rdi + 30], 0
     mov dword ptr [rdi + 34], r12d
-    mov rcx, opt_capture
+    mov rcx, capture_target
     invoke(CreateFileA, rcx, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
     cmp rax, -1
     je unmap

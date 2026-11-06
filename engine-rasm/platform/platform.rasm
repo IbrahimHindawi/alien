@@ -9,6 +9,7 @@
 #define MK_LBUTTON_BIT 1
 
 ; options ----------------------------------------------------------------
+k_percent: const f32 = 100.0
 opt_entities: u32 = 100000
 opt_seed: u32 = 1
 opt_frames: u32 = 0                    ; 0: run until closed
@@ -17,6 +18,8 @@ opt_bench_sim: u32 = 0                 ; --bench-sim: headless, no window
 opt_bench_ticks: u32 = 600
 opt_vsync: u32 = 1
 opt_capture: *u8 = 0                   ; --capture path.bmp: last frame to a file
+opt_god: u32 = 0                       ; --god: no contact damage (showcase recordings only, not the rules)
+opt_record: *u8 = 0                    ; --record dir: every second frame to dir/fNNNNN.bmp
 opt_dump: *u8 = 0                      ; --dump-state path: raw state after a bench run
 opt_width: u32 = 1600
 opt_height: u32 = 900
@@ -589,6 +592,36 @@ next:
         mov opt_dump, rax
         jmp advance
     not_dump:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--god")
+    test eax, eax
+    jz not_god
+        mov opt_god, 1
+        jmp advance
+    not_god:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--zoom")
+    test eax, eax
+    jz not_zoom
+        call next_number               ; percent
+        test edx, edx
+        jz failure
+        vcvtsi2ss xmm0, xmm0, eax
+        vdivss xmm0, xmm0, k_percent
+        vmovss cam_zoom, xmm0
+        jmp advance
+    not_zoom:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--record")
+    test eax, eax
+    jz not_record
+        inc edi
+        cmp edi, ebx
+        jae failure
+        mov rax, [rsi + rdi*8]
+        mov opt_record, rax
+        jmp advance
+    not_record:
     mov rcx, [rsi + rdi*8]
     invoke(string_equal, rcx, "--capture")
     test eax, eax
