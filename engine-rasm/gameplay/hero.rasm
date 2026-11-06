@@ -88,5 +88,25 @@ hero_read_keys: proc() -> u32 = {
     je no_d
         or eax, 8
     no_d:
+    cmp byte ptr [rcx + 0x20], 0       ; Space
+    je no_dash
+        or eax, DASH_BIT
+    no_dash:
+    cmp byte ptr [rcx + 0x51], 0       ; Q
+    je no_q
+        or eax, PULSE_BIT
+    no_q:
+    test mouse_buttons, 2              ; right mouse
+    jz no_rmb
+        or eax, PULSE_BIT
+    no_rmb:
+    cmp byte ptr [rcx + 0x45], 0       ; E, held
+    je no_e
+        or eax, BEAM_BIT
+    no_e:
+    cmp byte ptr [rcx + 0x46], 0       ; F
+    je no_f
+        or eax, BOMB_BIT
+    no_f:
     ret
 }

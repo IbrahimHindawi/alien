@@ -17,11 +17,14 @@ import "platform/threads.rasm"
 import "simulation/sim.rasm"
 import "simulation/separate_v2.rasm"
 import "simulation/combat.rasm"
+import "simulation/abilities.rasm"
 import "simulation/grid_mt.rasm"
 import "simulation/dump.rasm"
 import "renderer/math.rasm"
 import "renderer/camera.rasm"
 import "renderer/render.rasm"
+import "renderer/fx.rasm"
+import "renderer/ring_table.rasm"
 import "gameplay/hero.rasm"
 import "tests/tests.rasm"
 
@@ -331,6 +334,14 @@ simulate:
     je fixed_population
         call run_escalate
     fixed_population:
+    cmp opt_autoplay, 0
+    je by_hand
+        call bench_input               ; sets the aim too
+        mov sim_move_override, 0
+        mov ecx, eax
+        call sim_step
+        jmp stepped
+    by_hand:
     call hero_read_keys
     mov sim_move_override, 0
     cmp cam_mode, 0
@@ -350,6 +361,7 @@ simulate:
     vmovss xmm0, aim_z
     vmovss sim_aim_z, xmm0
     call sim_step
+    stepped:
     vmovss xmm0, render_time
     vaddss xmm0, xmm0, k_tick_seconds
     vmovss render_time, xmm0

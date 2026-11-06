@@ -308,6 +308,8 @@ sim_contact: proc() = {
     sub rsp, 40
     cmp hero_alive, 0
     je done
+    cmp dash_ticks, 0
+    jne done                           ; dashing: invulnerable
     mov r12, sim_sorted_id
     mov r13, sim_cell_start
     mov r14, sim_pos_x
@@ -526,6 +528,7 @@ sim_combat: proc() = {
     sub rsp, 40
     call sim_fire
     call sim_projectiles
+    call sim_abilities
     call sim_contact
     call sim_compact
     call sim_spawn

@@ -1,4 +1,4 @@
-"""Independent reference model of shared/specs/sim_spec.md (SIM 4).
+"""Independent reference model of shared/specs/sim_spec.md (SIM 5).
 
 Pure Python, written from the spec, not from the assembly. Every f32
 operation is computed in double precision and rounded to f32: for + - * / and
@@ -41,6 +41,12 @@ SPAWN_PER_TICK, SPAWN_MIN, SPAWN_SPAN = 64, 70.0, 50.0
 HALF_DT = f32(0.008333334)
 UNIT = f32(5.9604645e-08)
 MUZZLE = f32(0.8)
+DASH, PULSE, BEAM, BOMB = 32, 64, 128, 256
+DASH_TICKS, DASH_SPEED, DASH_CD = 10, 32.0, 45
+PULSE_CD, PULSE_STEP, PULSE_MAX, PULSE_PUSH = 240, 0.75, 36.0, 26.0
+BEAM_LEN, BEAM_W2, BEAM_DPT = 45.0, f32(0.64), f32(0.2)
+ENERGY_MAX, ENERGY_REGEN, BEAM_COST = 100.0, 0.25, 0.75
+BOMB_CD, BOMB_DELAY, BOMB_R, BOMB_R2, BOMB_DAMAGE, BOMB_PUSH = 480, 50, 12.0, 144.0, 4.0, 40.0
 
 
 class Pcg:
@@ -86,15 +92,37 @@ class Sim:
         self.kills = self.spawned = self.shots = 0
         self.target = count
         self.proj = []   # [x, z, vx, vz, life, pierce]
+        self.dash_ticks = self.dash_cd = 0
+        self.dash_x = self.dash_z = 0.0
+        self.pulse_cd = self.pulse_on = 0
+        self.pulse_r = self.pulse_cx = self.pulse_cz = 0.0
+        self.energy, self.beam_on = ENERGY_MAX, 0
+        self.bomb_cd = self.bomb_timer = 0
+        self.bomb_x = self.bomb_z = 0.0
 
     def step(self, keys, aim=(0.0, 1.0)):
         ix = float((1 if keys & 8 else 0) - (1 if keys & 2 else 0))
         iz = float((1 if keys & 1 else 0) - (1 if keys & 4 else 0))
         if ix != 0 and iz != 0:
             ix, iz = mul(ix, DIAG), mul(iz, DIAG)
+        if self.hero_alive and (keys & DASH) and self.dash_cd == 0 and self.dash_ticks == 0:
+            l2 = add(mul(ix, ix), mul(iz, iz))
+            if l2 > EPS:
+                r = f32(math.sqrt(l2))
+                self.dash_x, self.dash_z = div(ix, r), div(iz, r)
+            else:
+                self.dash_x, self.dash_z = self.aim_dir(aim)
+            self.dash_ticks, self.dash_cd = DASH_TICKS, DASH_CD
         if self.hero_alive:
-            self.hx = clamp(add(self.hx, mul(mul(ix, HERO_SPEED), DT)))
-            self.hz = clamp(add(self.hz, mul(mul(iz, HERO_SPEED), DT)))
+            if self.dash_ticks > 0:
+                self.hx = clamp(add(self.hx, mul(mul(self.dash_x, DASH_SPEED), DT)))
+                self.hz = clamp(add(self.hz, mul(mul(self.dash_z, DASH_SPEED), DT)))
+                self.dash_ticks -= 1
+            else:
+                self.hx = clamp(add(self.hx, mul(mul(ix, HERO_SPEED), DT)))
+                self.hz = clamp(add(self.hz, mul(mul(iz, HERO_SPEED), DT)))
+        if self.dash_cd > 0:
+            self.dash_cd -= 1
         n = self.count
         # grid
         cells = {}
@@ -162,16 +190,76 @@ class Sim:
                 if 0 <= c[0] < GRID_DIM and 0 <= c[1] < GRID_DIM:
                     yield from cells.get(c, ())
 
+    def aim_dir(self, aim):
+        dx, dz = sub(aim[0], self.hx), sub(aim[1], self.hz)
+        d2 = add(mul(dx, dx), mul(dz, dz))
+        if d2 > EPS:
+            inv = div(1.0, f32(math.sqrt(d2)))
+            return mul(dx, inv), mul(dz, inv)
+        return 0.0, 1.0
+
+    def abilities(self, keys, aim):
+        shell = None
+        if self.hero_alive and (keys & PULSE) and self.pulse_cd == 0:
+            self.pulse_on, self.pulse_r, self.pulse_cx, self.pulse_cz, self.pulse_cd = 1, 0.0, self.hx, self.hz, PULSE_CD
+        if self.pulse_on:
+            r0 = self.pulse_r
+            r1 = add(r0, PULSE_STEP)
+            k = mul(PULSE_PUSH, sub(1.0, div(r0, PULSE_MAX)))
+            shell = (mul(r0, r0), mul(r1, r1), k)
+            self.pulse_r = r1
+            if r1 >= PULSE_MAX:
+                self.pulse_on = 0
+        if self.pulse_cd > 0:
+            self.pulse_cd -= 1
+        beam = None
+        if self.hero_alive and (keys & BEAM) and self.energy >= BEAM_COST:
+            self.energy = sub(self.energy, BEAM_COST)
+            self.beam_on = 1
+            beam = self.aim_dir(aim)
+        else:
+            self.beam_on = 0
+            self.energy = min(add(self.energy, ENERGY_REGEN), ENERGY_MAX)
+        strike = False
+        if self.hero_alive and (keys & BOMB) and self.bomb_cd == 0 and self.bomb_timer == 0:
+            self.bomb_timer, self.bomb_x, self.bomb_z, self.bomb_cd = BOMB_DELAY, aim[0], aim[1], BOMB_CD
+        elif self.bomb_timer > 0:
+            self.bomb_timer -= 1
+            strike = self.bomb_timer == 0
+        if self.bomb_cd > 0:
+            self.bomb_cd -= 1
+        for i in range(self.count):
+            px, pz = self.px[i], self.pz[i]
+            if shell:
+                dx, dz = sub(px, self.pulse_cx), sub(pz, self.pulse_cz)
+                d2 = add(mul(dx, dx), mul(dz, dz))
+                if d2 >= shell[0] and d2 < shell[1] and d2 > EPS:
+                    inv = div(1.0, f32(math.sqrt(d2)))
+                    self.vx[i] = add(self.vx[i], mul(mul(dx, inv), shell[2]))
+                    self.vz[i] = add(self.vz[i], mul(mul(dz, inv), shell[2]))
+            if beam:
+                dx, dz = sub(px, self.hx), sub(pz, self.hz)
+                t = add(mul(dx, beam[0]), mul(dz, beam[1]))
+                d2 = add(mul(dx, dx), mul(dz, dz))
+                perp2 = sub(d2, mul(t, t))
+                if t >= 0.0 and t <= BEAM_LEN and perp2 < BEAM_W2:
+                    self.hp[i] = sub(self.hp[i], BEAM_DPT)
+            if strike:
+                dx, dz = sub(px, self.bomb_x), sub(pz, self.bomb_z)
+                d2 = add(mul(dx, dx), mul(dz, dz))
+                if d2 < BOMB_R2:
+                    self.hp[i] = sub(self.hp[i], BOMB_DAMAGE)
+                    if d2 > EPS:
+                        d = f32(math.sqrt(d2))
+                        inv = div(1.0, d)
+                        k = mul(BOMB_PUSH, sub(1.0, div(d, BOMB_R)))
+                        self.vx[i] = add(self.vx[i], mul(mul(dx, inv), k))
+                        self.vz[i] = add(self.vz[i], mul(mul(dz, inv), k))
+
     def combat(self, keys, aim, cells):
         # fire
         if self.hero_alive and self.cool == 0 and (keys & FIRE) and len(self.proj) < PROJ_MAX:
-            dx, dz = sub(aim[0], self.hx), sub(aim[1], self.hz)
-            d2 = add(mul(dx, dx), mul(dz, dz))
-            if d2 > EPS:
-                inv = div(1.0, f32(math.sqrt(d2)))
-                dx, dz = mul(dx, inv), mul(dz, inv)
-            else:
-                dx, dz = 0.0, 1.0
+            dx, dz = self.aim_dir(aim)
             k = self.shots % 3
             if k == 1:
                 dx, dz = sub(mul(dx, SPREAD_C), mul(dz, SPREAD_S)), add(mul(dx, SPREAD_S), mul(dz, SPREAD_C))
@@ -200,8 +288,9 @@ class Sim:
                                 break
             p[4] -= 1
         self.proj = [p for p in self.proj if p[4] > 0 and p[5] > 0]
+        self.abilities(keys, aim)
         # contact
-        if self.hero_alive:
+        if self.hero_alive and self.dash_ticks == 0:
             n = 0
             for j in self.candidates(self.hx, self.hz, cells):
                 if self.hp[j] > 0.0:
@@ -240,7 +329,17 @@ class Sim:
             self.spawned += 1
 
     def bench_keys(self):
-        return BENCH_KEYS[(self.tick // 120) & 3] | FIRE
+        k = BENCH_KEYS[(self.tick // 120) & 3] | FIRE
+        t = self.tick
+        if t % 180 == 0:
+            k |= DASH
+        if t % 300 == 60:
+            k |= PULSE
+        if (t // 90) % 2 == 1:
+            k |= BEAM
+        if t % 600 == 120:
+            k |= BOMB
+        return k
 
     def bench_aim(self):
         ax, az = BENCH_AIM[(self.tick // 30) & 3]
@@ -257,6 +356,7 @@ class Sim:
         data += struct.pack('<fIII', self.hero_hp, self.hero_alive, self.kills, len(self.proj))
         data += struct.pack(f'<{len(self.proj)}f', *(p[0] for p in self.proj))
         data += struct.pack(f'<{len(self.proj)}f', *(p[1] for p in self.proj))
+        data += struct.pack('<ffIII', self.energy, self.pulse_r, self.dash_ticks, self.pulse_on, self.bomb_timer)
         for b in data:
             h = ((h ^ b) * 0x100000001b3) & M64
         return h

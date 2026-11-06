@@ -22,6 +22,7 @@ SCENARIOS = [  # (entities, ticks, seed, spawn_half): sparse, dense, very dense 
     (3000, 300, 5, 20),
     (2000, 600, 11, 8),
     (4000, 400, 7, 150),        # hero survives: live projectiles in the hash
+    (4000, 700, 7, 150),        # every ability, twice: dash, pulse, beam, bomb strike
 ]
 QUICK = SCENARIOS[:2]
 

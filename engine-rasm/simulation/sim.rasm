@@ -1,4 +1,4 @@
-; simulation/sim.rasm: the swarm, exactly as shared/specs/sim_spec.md (SIM 4)
+; simulation/sim.rasm: the swarm, exactly as shared/specs/sim_spec.md (SIM 5)
 ;
 ; Structure of arrays, one entity per index, 64-byte aligned columns from the
 ; permanent arena. Every float operation is one of the spec's, in its order:
@@ -204,6 +204,15 @@ sim_init: proc(count: u32, seed: u32) = {
     mov spawned, 0
     mov shots, 0
     mov proj_count, 0
+    mov dash_ticks, 0
+    mov dash_cd, 0
+    mov pulse_cd, 0
+    mov pulse_on, 0
+    mov pulse_r, 0
+    mov energy, 0x42C80000             ; 100.0
+    mov beam_on, 0
+    mov bomb_cd, 0
+    mov bomb_timer, 0
     mov ebx, ecx
     mov ecx, edx
     call pcg32_seed
@@ -280,23 +289,40 @@ keys_to_move: proc(keys: u32) = {
 }
 
 sim_hero: proc() = {
+    sub rsp, 40
     cmp hero_alive, 0
     je dead
+    call dash_start
+    cmp dash_ticks, 0
+    je walk
+        dec dash_ticks
+        vmovss xmm0, dash_x
+        vmovss xmm1, dash_z
+        vmulss xmm0, xmm0, k_dash_speed
+        vmulss xmm1, xmm1, k_dash_speed
+        jmp moving
+    walk:
     vmovss xmm0, sim_move_x
     vmovss xmm1, sim_move_z
     vmulss xmm0, xmm0, k_hero_speed
+    vmulss xmm1, xmm1, k_hero_speed
+    moving:
     vmulss xmm0, xmm0, k_dt[0]
     vaddss xmm0, xmm0, hero_x
     vmaxss xmm0, xmm0, k_lo[0]
     vminss xmm0, xmm0, k_hi[0]
     vmovss hero_x, xmm0
-    vmulss xmm1, xmm1, k_hero_speed
     vmulss xmm1, xmm1, k_dt[0]
     vaddss xmm1, xmm1, hero_z
     vmaxss xmm1, xmm1, k_lo[0]
     vminss xmm1, xmm1, k_hi[0]
     vmovss hero_z, xmm1
 dead:
+    cmp dash_cd, 0
+    je cooled
+    dec dash_cd
+cooled:
+    add rsp, 40
     ret
 }
 
@@ -700,8 +726,42 @@ bench_input: proc() -> u32 = {
     div ecx
     and eax, 3
     lea rcx, bench_keys
-    movzx eax, byte ptr [rcx + rax]
-    or eax, FIRE_BIT
+    movzx r8d, byte ptr [rcx + rax]
+    or r8d, FIRE_BIT
+    ; abilities on a fixed schedule (spec 4.8)
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, 180
+    div ecx
+    test edx, edx
+    jnz no_dash
+        or r8d, DASH_BIT
+    no_dash:
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, 300
+    div ecx
+    cmp edx, 60
+    jne no_pulse
+        or r8d, PULSE_BIT
+    no_pulse:
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, 90
+    div ecx
+    test eax, 1
+    jz no_beam
+        or r8d, BEAM_BIT
+    no_beam:
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, 600
+    div ecx
+    cmp edx, 120
+    jne no_bomb
+        or r8d, BOMB_BIT
+    no_bomb:
+    mov eax, r8d
     ret
 }
 
@@ -749,6 +809,11 @@ sim_hash: proc() -> u64 = {
     shl esi, 2
     invoke(fnv1a, proj_x&, rsi, rax)
     invoke(fnv1a, proj_z&, rsi, rax)
+    invoke(fnv1a, energy&, 4, rax)
+    invoke(fnv1a, pulse_r&, 4, rax)
+    invoke(fnv1a, dash_ticks&, 4, rax)
+    invoke(fnv1a, pulse_on&, 4, rax)
+    invoke(fnv1a, bomb_timer&, 4, rax)
     add rsp, 40
     pop rsi
     pop rbx

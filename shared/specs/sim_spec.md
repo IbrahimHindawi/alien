@@ -19,7 +19,7 @@ How exactness is achieved:
 - Default MXCSR (round to nearest, no FTZ/DAZ). Both engines must leave it
   alone.
 
-Version: **SIM 4** (milestone 4: combat: hero weapon, damage, death, spawning). Bump the number
+Version: **SIM 5** (milestone 6: abilities: dash, gravity pulse, beam, orbital bombardment). Bump the number
 on any rule change; the scenario fixtures record the version they were made
 with.
 
@@ -274,14 +274,81 @@ count, so the population stays constant as enemies die).
 **Hero death.** While `hero_alive == 0` the hero does not move or fire;
 enemies continue. Restart is a scenario re-init, outside the simulation.
 
-### 4.6 End of tick
+### 4.6 Abilities (SIM 5)
+
+Input bits: `DASH = 32`, `PULSE = 64`, `BEAM = 128`, `BOMB = 256`.
+
+    DASH_TICKS 10      DASH_SPEED 32.0f    DASH_CD 45
+    PULSE_CD 240       PULSE_STEP 0.75f    PULSE_MAX 36.0f    PULSE_PUSH 26.0f
+    BEAM_LEN 45.0f     BEAM_W2 0.64f       BEAM_DPT 0.2f
+    ENERGY_MAX 100.0f  ENERGY_REGEN 0.25f  BEAM_COST 0.75f
+    BOMB_CD 480        BOMB_DELAY 50       BOMB_R 12.0f       BOMB_R2 144.0f
+    BOMB_DAMAGE 4.0f   BOMB_PUSH 40.0f
+
+State: `dash_ticks, dash_cd` (u32), `dash_x, dash_z` (f32); `pulse_cd`,
+`pulse_on` (u32), `pulse_r, pulse_cx, pulse_cz` (f32); `energy` (f32,
+`ENERGY_MAX` at init), `beam_on` (u32); `bomb_cd, bomb_timer` (u32),
+`bomb_x, bomb_z` (f32). All zero at init except `energy`.
+
+**Hero (replaces 4.1's movement while dashing).** At the start of the tick,
+if alive, `DASH` held, `dash_cd == 0` and `dash_ticks == 0`: the dash
+direction is the move vector `(mx, mz)` normalised (`l2 = mx*mx + mz*mz`; if
+`l2 > 1e-4f`: divide each by `sqrt(l2)`), else the aim direction normalised
+as in Fire, else `(0, 1)`; `dash_ticks = DASH_TICKS; dash_cd = DASH_CD`.
+Then, if alive: when `dash_ticks > 0`, `hero = clamp(hero + (dash * DASH_SPEED)
+* DT)` per axis and `dash_ticks = dash_ticks - 1`; otherwise the move of 4.1.
+Then `if dash_cd > 0: dash_cd = dash_cd - 1`.
+
+**Area effects**, after Projectiles and before Contact. First the effects of
+the tick are decided, in this order:
+
+- *Pulse*: if alive, `PULSE` held and `pulse_cd == 0`: `pulse_on = 1,
+  pulse_r = 0, pulse_c = hero, pulse_cd = PULSE_CD`. If `pulse_on`: the shell
+  is `r0 = pulse_r`, `r1 = r0 + PULSE_STEP`, strength
+  `k = PULSE_PUSH * (1.0f - r0 / PULSE_MAX)`; afterwards `pulse_r = r1`, and
+  `pulse_on = 0` when `r1 >= PULSE_MAX`. Then `if pulse_cd > 0: pulse_cd -= 1`.
+- *Beam*: if alive, `BEAM` held and `energy >= BEAM_COST`: `energy = energy -
+  BEAM_COST`, `beam_on = 1`, direction `u` = the aim direction normalised as
+  in Fire; else `beam_on = 0` and `energy = min(energy + ENERGY_REGEN,
+  ENERGY_MAX)`.
+- *Bomb*: if alive, `BOMB` held, `bomb_cd == 0` and `bomb_timer == 0`:
+  `bomb_timer = BOMB_DELAY, bomb = aim, bomb_cd = BOMB_CD`. Otherwise, if
+  `bomb_timer > 0`: `bomb_timer = bomb_timer - 1`, and the strike happens
+  this tick when it becomes 0. Then `if bomb_cd > 0: bomb_cd -= 1`.
+
+Then one pass over every entity `i` (any order: each touches only its own
+values), applying the active effects in this order, positions as after 4.4:
+
+    pulse (if this tick has a shell):
+        dx = pos_x - pulse_cx; dz = pos_z - pulse_cz; d2 = dx*dx + dz*dz
+        if d2 >= r0*r0 and d2 < r1*r1 and d2 > 1e-4f:
+            inv = 1.0f / sqrt(d2); vel_x = vel_x + (dx * inv) * k; vel_z likewise
+    beam (if beam_on):
+        dx = pos_x - hero_x; dz = pos_z - hero_z
+        t = dx*ux + dz*uz;  d2 = dx*dx + dz*dz;  perp2 = d2 - t*t
+        if t >= 0.0f and t <= BEAM_LEN and perp2 < BEAM_W2: hp = hp - BEAM_DPT
+    bomb (if it strikes this tick):
+        dx = pos_x - bomb_x; dz = pos_z - bomb_z; d2 = dx*dx + dz*dz
+        if d2 < BOMB_R2:
+            hp = hp - BOMB_DAMAGE
+            if d2 > 1e-4f: d = sqrt(d2); inv = 1.0f / d
+                vel_x = vel_x + (dx * inv) * (BOMB_PUSH * (1.0f - d / BOMB_R)); vel_z likewise
+
+(`dx*ux + dz*uz` is `(dx*ux) + (dz*uz)`; `r0*r0`, `r1*r1` are computed once.)
+
+**Contact** is skipped while `dash_ticks > 0` (the dash makes the hero
+invulnerable), as is when the hero is dead.
+
+### 4.7 End of tick
 
     tick = tick + 1
 
-### 4.7 Bench input
+### 4.8 Bench input
 
 The recorded bench input is generated: `keys = BENCH_KEYS[(tick / 120) & 3]
-| FIRE` with `BENCH_KEYS = {W, D, S, A}`, and the aim
+| FIRE`, plus (SIM 5) `DASH` when `tick % 180 == 0`, `PULSE` when
+`tick % 300 == 60`, `BEAM` when `(tick / 90) % 2 == 1`, `BOMB` when
+`tick % 600 == 120` with `BENCH_KEYS = {W, D, S, A}`, and the aim
 `aim = hero + BENCH_AIM[(tick / 30) & 3]` (computed with the hero position
 at the start of the tick: `aim_x = hero_x + ax` as one f32 add), with
 `BENCH_AIM = {(10, 0), (0, 10), (-10, 0), (0, -10)}`.
@@ -292,7 +359,8 @@ FNV-1a 64 (offset `0xcbf29ce484222325`, prime `0x100000001b3`) over, in
 order: `count` (4 bytes), `tick` (4), `hero_x`, `hero_z` (4 each), then the
 raw bytes of `pos_x[0..count)`, `pos_z[0..count)`, `vel_x[0..count)`,
 `vel_z[0..count)`, then (SIM 4) `hp[0..count)`, `hero_hp`, `hero_alive`,
-`kills`, `proj_count` (4 each), `proj_x, proj_z[0..proj_count)`. Printed as 16
+`kills`, `proj_count` (4 each), `proj_x, proj_z[0..proj_count)`, then (SIM 5)
+`energy`, `pulse_r` (f32), `dash_ticks`, `pulse_on`, `bomb_timer` (u32). Printed as 16
 lowercase hex digits.
 
 Init (SIM 4) additionally sets `hp[i] = ENEMY_HP`, `hero_hp = HERO_HP`,

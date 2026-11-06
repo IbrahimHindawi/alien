@@ -1,0 +1,169 @@
+; renderer/fx.rasm: projectiles and ability effects as glowing bolt instances
+;
+; Everything here is presentation: it reads simulation state and writes
+; instances, never the other way. Cyan batch: projectiles, the beam (a line
+; of bolts along it), the pulse (a ring of bolts at its radius, tangent).
+; Red batch: the bombardment telegraph, a ring closing on the strike point.
+
+#define BEAM_BOLTS 30
+#define FX_EXTRA 128
+
+fx_red_buffer: *ID3D11Buffer = {}
+bolt_red_mesh: Mesh = {}
+fx_red_count: u32 = 0
+red_desc: D3D11_BUFFER_DESC = {
+    .ByteWidth = 64 * INSTANCE_BYTES,
+    .Usage = D3D11_USAGE.D3D11_USAGE_DYNAMIC,
+    .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
+    .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
+}
+k_beam_step: const f32 = 1.5
+k_beam_start: const f32 = 1.2
+k_bomb_delay: const f32 = 50.0
+
+; rdx: write pointer, xmm0 x, xmm1 z, xmm2 vx, xmm3 vz -> rdx advanced
+fx_put: proc() = {
+    vinsertps xmm0, xmm0, xmm1, 0x10
+    vinsertps xmm0, xmm0, xmm2, 0x20
+    vinsertps xmm0, xmm0, xmm3, 0x30
+    vmovups xmmword ptr [rdx], xmm0
+    add rdx, 16
+    ret
+}
+
+; rdx: write pointer; xmm4 cx, xmm5 cz, [ring radius in fx_radius]: 48 bolts, tangent
+fx_radius: f32 = 0.0
+fx_ring: proc() = {
+    push rbx
+    lea rbx, ring48
+    xor ecx, ecx
+again:
+    vmovss xmm2, dword ptr [rbx + rcx*8]       ; cos
+    vmovss xmm3, dword ptr [rbx + rcx*8 + 4]   ; sin
+    vmulss xmm0, xmm2, fx_radius
+    vaddss xmm0, xmm0, xmm4
+    vmulss xmm1, xmm3, fx_radius
+    vaddss xmm1, xmm1, xmm5
+    ; tangent (-sin, cos) as the bolt's heading
+    vxorps xmm6, xmm6, xmm6
+    vsubss xmm6, xmm6, xmm3
+    vmovss xmm3, xmm3, xmm2
+    vmovss xmm2, xmm2, xmm6
+    call fx_put
+    inc ecx
+    cmp ecx, 48
+    jb again
+    pop rbx
+    ret
+}
+
+; Build both batches and draw them with the unit pipeline.
+render_fx: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 88                        ; 8 + 16 + 88 = 112; xmm6 at [rsp + 64]
+    movaps xmmword ptr [rsp + 64], xmm6
+    ; cyan batch
+    vcall(context, ID3D11DeviceContextVtbl.Map, bolt_buffer, 0, D3D11_MAP.D3D11_MAP_WRITE_DISCARD, 0, mapped&)
+    test eax, eax
+    js done
+    mov rdx, mapped.pData
+    mov rsi, rdx
+    ; projectiles
+    mov ebx, proj_count
+    xor ecx, ecx
+proj:
+    cmp ecx, ebx
+    jae projected
+    lea rax, proj_x
+    vmovss xmm0, dword ptr [rax + rcx*4]
+    lea rax, proj_z
+    vmovss xmm1, dword ptr [rax + rcx*4]
+    lea rax, proj_vx
+    vmovss xmm2, dword ptr [rax + rcx*4]
+    lea rax, proj_vz
+    vmovss xmm3, dword ptr [rax + rcx*4]
+    call fx_put
+    inc ecx
+    jmp proj
+projected:
+    ; beam: bolts every 1.5 m from the muzzle along u
+    cmp beam_on, 0
+    je no_beam
+    cmp hero_alive, 0
+    je no_beam
+    xor ecx, ecx
+    vmovss xmm4, k_beam_start
+beam:
+    vmovss xmm2, beam_ux
+    vmovss xmm3, beam_uz
+    vmulss xmm0, xmm2, xmm4
+    vaddss xmm0, xmm0, hero_x
+    vmulss xmm1, xmm3, xmm4
+    vaddss xmm1, xmm1, hero_z
+    call fx_put
+    vaddss xmm4, xmm4, k_beam_step
+    inc ecx
+    cmp ecx, BEAM_BOLTS
+    jb beam
+no_beam:
+    ; pulse ring
+    cmp pulse_on, 0
+    je no_pulse
+    vmovss xmm0, pulse_r
+    vmovss fx_radius, xmm0
+    vmovss xmm4, pulse_cx
+    vmovss xmm5, pulse_cz
+    call fx_ring
+no_pulse:
+    mov rax, rdx
+    sub rax, rsi
+    shr rax, 4
+    mov bolt_count, eax
+    vcall(context, ID3D11DeviceContextVtbl.Unmap, bolt_buffer, 0)
+    ; red batch: the bombardment telegraph, radius 12 * timer / delay
+    mov fx_red_count, 0
+    cmp bomb_timer, 0
+    je red_done
+    vcall(context, ID3D11DeviceContextVtbl.Map, fx_red_buffer, 0, D3D11_MAP.D3D11_MAP_WRITE_DISCARD, 0, mapped&)
+    test eax, eax
+    js red_done
+    mov rdx, mapped.pData
+    mov eax, bomb_timer
+    vcvtsi2ss xmm0, xmm0, eax
+    vdivss xmm0, xmm0, k_bomb_delay
+    vmulss xmm0, xmm0, k_bomb_r
+    vmovss fx_radius, xmm0
+    vmovss xmm4, bomb_x
+    vmovss xmm5, bomb_z
+    call fx_ring
+    mov fx_red_count, 48
+    vcall(context, ID3D11DeviceContextVtbl.Unmap, fx_red_buffer, 0)
+red_done:
+    ; draw
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_unit, 0, 0)
+    mov eax, bolt_count
+    test eax, eax
+    jz cyan_done
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, bolt_mesh.vb&, mesh_stride&, mesh_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 1, 1, bolt_buffer&, instance_stride&, instance_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetIndexBuffer, bolt_mesh.ib, DXGI_FORMAT.DXGI_FORMAT_R32_UINT, 0)
+    mov eax, bolt_mesh.index_count
+    mov r8d, bolt_count
+    vcall(context, ID3D11DeviceContextVtbl.DrawIndexedInstanced, rax, r8, 0, 0, 0)
+cyan_done:
+    cmp fx_red_count, 0
+    je done
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, bolt_red_mesh.vb&, mesh_stride&, mesh_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 1, 1, fx_red_buffer&, instance_stride&, instance_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetIndexBuffer, bolt_red_mesh.ib, DXGI_FORMAT.DXGI_FORMAT_R32_UINT, 0)
+    mov eax, bolt_red_mesh.index_count
+    mov r8d, fx_red_count
+    vcall(context, ID3D11DeviceContextVtbl.DrawIndexedInstanced, rax, r8, 0, 0, 0)
+done:
+    movaps xmm6, xmmword ptr [rsp + 64]
+    add rsp, 88
+    pop rsi
+    pop rbx
+    ret
+}

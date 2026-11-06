@@ -1,0 +1,363 @@
+; simulation/abilities.rasm: SIM 5 abilities (sim_spec.md 4.6)
+;
+; Dash lives in sim_hero. Pulse, beam and bomb are decided here in scalar
+; code, then applied to every entity by one 8-wide pool job, effects in the
+; spec's order. Lanes an effect does not touch keep their values exactly
+; (vblendvps, not added zeros).
+
+#define DASH_BIT 32
+#define PULSE_BIT 64
+#define BEAM_BIT 128
+#define BOMB_BIT 256
+#define DASH_TICKS 10
+#define DASH_CD 45
+#define PULSE_CD 240
+#define BOMB_CD 480
+#define BOMB_DELAY 50
+#define AREA_CHUNK 16384
+
+dash_ticks: u32 = 0
+dash_cd: u32 = 0
+dash_x: f32 = 0.0
+dash_z: f32 = 0.0
+pulse_cd: u32 = 0
+pulse_on: u32 = 0
+pulse_r: f32 = 0.0
+pulse_cx: f32 = 0.0
+pulse_cz: f32 = 0.0
+energy: f32 = 100.0
+beam_on: u32 = 0
+beam_ux: f32 = 0.0
+beam_uz: f32 = 1.0
+bomb_cd: u32 = 0
+bomb_timer: u32 = 0
+bomb_x: f32 = 0.0
+bomb_z: f32 = 0.0
+; this tick's effects
+fx_pulse: u32 = 0
+fx_r0sq: f32 = 0.0
+fx_r1sq: f32 = 0.0
+fx_k: f32 = 0.0
+fx_bomb: u32 = 0
+
+k_dash_speed: const f32 = 32.0
+k_pulse_step: const f32 = 0.75
+k_pulse_max: const f32 = 36.0
+k_pulse_push: const f32 = 26.0
+k_beam_len: const f32 = 45.0
+k_beam_w2: const f32 = 0.64
+k_beam_dpt: const f32 = 0.2
+k_energy_max: const f32 = 100.0
+k_energy_regen: const f32 = 0.25
+k_beam_cost: const f32 = 0.75
+k_bomb_r: const f32 = 12.0
+k_bomb_r2: const f32 = 144.0
+k_bomb_damage: const f32 = 4.0
+k_bomb_push: const f32 = 40.0
+
+; -> xmm0, xmm1: the aim direction normalised, or (0, 1) (spec: as in Fire)
+aim_direction: proc() = {
+    vmovss xmm0, sim_aim_x
+    vsubss xmm0, xmm0, hero_x
+    vmovss xmm1, sim_aim_z
+    vsubss xmm1, xmm1, hero_z
+    vmulss xmm2, xmm0, xmm0
+    vmulss xmm3, xmm1, xmm1
+    vaddss xmm2, xmm2, xmm3
+    vcomiss xmm2, k_fire_eps
+    jbe straight
+    vsqrtss xmm2, xmm2, xmm2
+    vmovss xmm3, k_one[0]
+    vdivss xmm3, xmm3, xmm2
+    vmulss xmm0, xmm0, xmm3
+    vmulss xmm1, xmm1, xmm3
+    ret
+straight:
+    vxorps xmm0, xmm0, xmm0
+    vmovss xmm1, k_one[0]
+    ret
+}
+
+; Start a dash when asked (called by sim_hero before moving).
+dash_start: proc() = {
+    sub rsp, 40
+    test sim_in_keys, DASH_BIT
+    jz done
+    cmp dash_cd, 0
+    jne done
+    cmp dash_ticks, 0
+    jne done
+    vmovss xmm0, sim_move_x
+    vmovss xmm1, sim_move_z
+    vmulss xmm2, xmm0, xmm0
+    vmulss xmm3, xmm1, xmm1
+    vaddss xmm2, xmm2, xmm3
+    vcomiss xmm2, k_fire_eps
+    jbe by_aim
+        vsqrtss xmm2, xmm2, xmm2
+        vdivss xmm0, xmm0, xmm2
+        vdivss xmm1, xmm1, xmm2
+        jmp have_dir
+    by_aim:
+        call aim_direction
+    have_dir:
+    vmovss dash_x, xmm0
+    vmovss dash_z, xmm1
+    mov dash_ticks, DASH_TICKS
+    mov dash_cd, DASH_CD
+done:
+    add rsp, 40
+    ret
+}
+
+; Decide this tick's effects, then apply them to every entity.
+sim_abilities: proc() = {
+    sub rsp, 40
+    ; pulse
+    mov fx_pulse, 0
+    cmp hero_alive, 0
+    je pulse_running
+    test sim_in_keys, PULSE_BIT
+    jz pulse_running
+    cmp pulse_cd, 0
+    jne pulse_running
+        mov pulse_on, 1
+        mov pulse_r, 0
+        vmovss xmm0, hero_x
+        vmovss pulse_cx, xmm0
+        vmovss xmm0, hero_z
+        vmovss pulse_cz, xmm0
+        mov pulse_cd, PULSE_CD
+    pulse_running:
+    cmp pulse_on, 0
+    je pulse_cool
+        mov fx_pulse, 1
+        vmovss xmm0, pulse_r                   ; r0
+        vaddss xmm1, xmm0, k_pulse_step        ; r1
+        vdivss xmm2, xmm0, k_pulse_max
+        vmovss xmm3, k_one[0]
+        vsubss xmm2, xmm3, xmm2
+        vmovss xmm3, k_pulse_push
+        vmulss xmm2, xmm3, xmm2                ; k = PUSH * (1 - r0 / MAX)
+        vmovss fx_k, xmm2
+        vmulss xmm2, xmm0, xmm0
+        vmovss fx_r0sq, xmm2
+        vmulss xmm2, xmm1, xmm1
+        vmovss fx_r1sq, xmm2
+        vmovss pulse_r, xmm1
+        vcomiss xmm1, k_pulse_max
+        jb pulse_cool
+        mov pulse_on, 0
+    pulse_cool:
+    cmp pulse_cd, 0
+    je pulse_done
+    dec pulse_cd
+    pulse_done:
+    ; beam
+    cmp hero_alive, 0
+    je no_beam
+    test sim_in_keys, BEAM_BIT
+    jz no_beam
+    vmovss xmm0, energy
+    vcomiss xmm0, k_beam_cost
+    jb no_beam
+        vsubss xmm0, xmm0, k_beam_cost
+        vmovss energy, xmm0
+        mov beam_on, 1
+        call aim_direction
+        vmovss beam_ux, xmm0
+        vmovss beam_uz, xmm1
+        jmp beam_done
+    no_beam:
+        mov beam_on, 0
+        vmovss xmm0, energy
+        vaddss xmm0, xmm0, k_energy_regen
+        vminss xmm0, xmm0, k_energy_max
+        vmovss energy, xmm0
+    beam_done:
+    ; bomb
+    mov fx_bomb, 0
+    cmp hero_alive, 0
+    je bomb_tick
+    test sim_in_keys, BOMB_BIT
+    jz bomb_tick
+    cmp bomb_cd, 0
+    jne bomb_tick
+    cmp bomb_timer, 0
+    jne bomb_tick
+        mov bomb_timer, BOMB_DELAY
+        vmovss xmm0, sim_aim_x
+        vmovss bomb_x, xmm0
+        vmovss xmm0, sim_aim_z
+        vmovss bomb_z, xmm0
+        mov bomb_cd, BOMB_CD
+        jmp bomb_cool
+    bomb_tick:
+    cmp bomb_timer, 0
+    je bomb_cool
+        dec bomb_timer
+        jnz bomb_cool
+        mov fx_bomb, 1
+    bomb_cool:
+    cmp bomb_cd, 0
+    je bomb_done
+    dec bomb_cd
+    bomb_done:
+    ; apply
+    mov eax, fx_pulse
+    or eax, beam_on
+    or eax, fx_bomb
+    jz none
+    mov rcx, area_job&
+    mov edx, sim_count
+    mov r8d, AREA_CHUNK
+    call pool_dispatch
+none:
+    add rsp, 40
+    ret
+}
+
+; ecx: first entity (a multiple of 8), edx: one past the last
+area_job: proc(begin: u32, end: u32, chunk: u32) = {
+    push rsi
+    push rdi
+    sub rsp, 120                       ; 8 + 16 + 120 = 144; xmm6..12 at [rsp ..]
+    movaps xmmword ptr [rsp], xmm6
+    movaps xmmword ptr [rsp + 16], xmm7
+    movaps xmmword ptr [rsp + 32], xmm8
+    movaps xmmword ptr [rsp + 48], xmm9
+    movaps xmmword ptr [rsp + 64], xmm10
+    movaps xmmword ptr [rsp + 80], xmm11
+    movaps xmmword ptr [rsp + 96], xmm12
+    mov r8, sim_pos_x
+    mov r9, sim_pos_z
+    mov r10, sim_vel_x
+    mov r11, sim_vel_z
+    mov rsi, sim_hp
+    mov eax, ecx
+    sub edx, ecx
+    add edx, 7
+    shr edx, 3                         ; blocks
+    shl rax, 2
+    test edx, edx
+    jz done
+block:
+    vmovaps ymm0, ymmword ptr [r8 + rax]           ; px
+    vmovaps ymm1, ymmword ptr [r9 + rax]           ; pz
+    vmovaps ymm2, ymmword ptr [r10 + rax]          ; vx
+    vmovaps ymm3, ymmword ptr [r11 + rax]          ; vz
+    vmovaps ymm4, ymmword ptr [rsi + rax]          ; hp
+    cmp fx_pulse, 0
+    je no_pulse
+        vbroadcastss ymm5, pulse_cx
+        vsubps ymm5, ymm0, ymm5                    ; dx
+        vbroadcastss ymm6, pulse_cz
+        vsubps ymm6, ymm1, ymm6                    ; dz
+        vmulps ymm7, ymm5, ymm5
+        vmulps ymm8, ymm6, ymm6
+        vaddps ymm7, ymm7, ymm8                    ; d2
+        vbroadcastss ymm8, fx_r0sq
+        vcmpps ymm9, ymm7, ymm8, 29                ; d2 >= r0^2
+        vbroadcastss ymm8, fx_r1sq
+        vcmpps ymm10, ymm7, ymm8, 17               ; d2 < r1^2
+        vandps ymm9, ymm9, ymm10
+        vbroadcastss ymm8, k_fire_eps
+        vcmpps ymm10, ymm7, ymm8, 30               ; d2 > 1e-4
+        vandps ymm9, ymm9, ymm10                   ; mask
+        vbroadcastss ymm8, k_one[0]
+        vblendvps ymm7, ymm8, ymm7, ymm10          ; d2, or 1 where too close
+        vsqrtps ymm7, ymm7
+        vdivps ymm7, ymm8, ymm7                    ; inv
+        vbroadcastss ymm8, fx_k
+        vmulps ymm5, ymm5, ymm7
+        vmulps ymm5, ymm5, ymm8                    ; (dx * inv) * k
+        vaddps ymm5, ymm2, ymm5
+        vblendvps ymm2, ymm2, ymm5, ymm9
+        vmulps ymm6, ymm6, ymm7
+        vmulps ymm6, ymm6, ymm8
+        vaddps ymm6, ymm3, ymm6
+        vblendvps ymm3, ymm3, ymm6, ymm9
+    no_pulse:
+    cmp beam_on, 0
+    je no_beam
+        vbroadcastss ymm5, hero_x
+        vsubps ymm5, ymm0, ymm5                    ; dx
+        vbroadcastss ymm6, hero_z
+        vsubps ymm6, ymm1, ymm6                    ; dz
+        vbroadcastss ymm7, beam_ux
+        vmulps ymm7, ymm5, ymm7
+        vbroadcastss ymm8, beam_uz
+        vmulps ymm8, ymm6, ymm8
+        vaddps ymm7, ymm7, ymm8                    ; t
+        vmulps ymm5, ymm5, ymm5
+        vmulps ymm6, ymm6, ymm6
+        vaddps ymm5, ymm5, ymm6                    ; d2
+        vmulps ymm6, ymm7, ymm7
+        vsubps ymm5, ymm5, ymm6                    ; perp2
+        vxorps ymm6, ymm6, ymm6
+        vcmpps ymm9, ymm7, ymm6, 29                ; t >= 0
+        vbroadcastss ymm6, k_beam_len
+        vcmpps ymm10, ymm7, ymm6, 18               ; t <= LEN (LE_OQ)
+        vandps ymm9, ymm9, ymm10
+        vbroadcastss ymm6, k_beam_w2
+        vcmpps ymm10, ymm5, ymm6, 17               ; perp2 < W2
+        vandps ymm9, ymm9, ymm10
+        vbroadcastss ymm6, k_beam_dpt
+        vsubps ymm6, ymm4, ymm6
+        vblendvps ymm4, ymm4, ymm6, ymm9
+    no_beam:
+    cmp fx_bomb, 0
+    je no_bomb
+        vbroadcastss ymm5, bomb_x
+        vsubps ymm5, ymm0, ymm5                    ; dx
+        vbroadcastss ymm6, bomb_z
+        vsubps ymm6, ymm1, ymm6                    ; dz
+        vmulps ymm7, ymm5, ymm5
+        vmulps ymm8, ymm6, ymm6
+        vaddps ymm7, ymm7, ymm8                    ; d2
+        vbroadcastss ymm8, k_bomb_r2
+        vcmpps ymm9, ymm7, ymm8, 17                ; d2 < R2
+        vbroadcastss ymm8, k_bomb_damage
+        vsubps ymm8, ymm4, ymm8
+        vblendvps ymm4, ymm4, ymm8, ymm9           ; hp
+        vbroadcastss ymm8, k_fire_eps
+        vcmpps ymm10, ymm7, ymm8, 30
+        vandps ymm9, ymm9, ymm10                   ; pushed lanes
+        vbroadcastss ymm8, k_one[0]
+        vblendvps ymm7, ymm8, ymm7, ymm10
+        vsqrtps ymm7, ymm7                         ; d
+        vdivps ymm11, ymm8, ymm7                   ; inv
+        vbroadcastss ymm12, k_bomb_r
+        vdivps ymm7, ymm7, ymm12                   ; d / R
+        vsubps ymm7, ymm8, ymm7                    ; 1 - d / R
+        vbroadcastss ymm12, k_bomb_push
+        vmulps ymm7, ymm12, ymm7                   ; k = PUSH * (1 - d / R)
+        vmulps ymm5, ymm5, ymm11
+        vmulps ymm5, ymm5, ymm7
+        vaddps ymm5, ymm2, ymm5
+        vblendvps ymm2, ymm2, ymm5, ymm9
+        vmulps ymm6, ymm6, ymm11
+        vmulps ymm6, ymm6, ymm7
+        vaddps ymm6, ymm3, ymm6
+        vblendvps ymm3, ymm3, ymm6, ymm9
+    no_bomb:
+    vmovaps ymmword ptr [r10 + rax], ymm2
+    vmovaps ymmword ptr [r11 + rax], ymm3
+    vmovaps ymmword ptr [rsi + rax], ymm4
+    add rax, 32
+    dec edx
+    jnz block
+done:
+    vzeroupper
+    movaps xmm6, xmmword ptr [rsp]
+    movaps xmm7, xmmword ptr [rsp + 16]
+    movaps xmm8, xmmword ptr [rsp + 32]
+    movaps xmm9, xmmword ptr [rsp + 48]
+    movaps xmm10, xmmword ptr [rsp + 64]
+    movaps xmm11, xmmword ptr [rsp + 80]
+    movaps xmm12, xmmword ptr [rsp + 96]
+    add rsp, 120
+    pop rdi
+    pop rsi
+    ret
+}
