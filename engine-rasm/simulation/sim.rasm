@@ -107,11 +107,11 @@ sim_alloc: proc() -> b32 = {
     mov sim_cell_arr, rax
     add rax, 4
     mov sim_cell_start, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)    ; padding: 8-lane reads past the end
     test rax, rax
     jz failed
     mov sim_sorted_x, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_sorted_z, rax
@@ -594,7 +594,7 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_grid, rcx
     mov rbx, rax
-    call sim_separate
+    call sim_separate_v2
     rdtsc
     shl rdx, 32
     or rax, rdx

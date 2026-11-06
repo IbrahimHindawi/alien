@@ -218,6 +218,66 @@ b:
     ret
 }
 
+; Separation v2 (SIMD blocks) against the scalar reference version on a
+; crowded state: the sep columns must be identical bit for bit.
+test_separate_v2: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32
+    mov ecx, 30000
+    mov edx, 21
+    call sim_init
+    ; crowd them: positions folded into a 30 m square, so cells are full
+    mov rax, sim_pos_x
+    mov rdx, sim_pos_z
+    xor ecx, ecx
+fold:
+    vmovss xmm0, dword ptr [rax + rcx*4]
+    vmulss xmm0, xmm0, k_fold[0]
+    vmovss dword ptr [rax + rcx*4], xmm0
+    vmovss xmm0, dword ptr [rdx + rcx*4]
+    vmulss xmm0, xmm0, k_fold[0]
+    vmovss dword ptr [rdx + rcx*4], xmm0
+    inc ecx
+    cmp ecx, 30000
+    jb fold
+    call sim_grid
+    call sim_separate
+    ; keep the scalar result in the vel columns (unused by separation)
+    mov rsi, sim_sep_x
+    mov rdi, sim_vel_x
+    mov ecx, 30000
+    rep movsd
+    mov rsi, sim_sep_z
+    mov rdi, sim_vel_z
+    mov ecx, 30000
+    rep movsd
+    call sim_separate_v2
+    mov rsi, sim_sep_x
+    mov rdi, sim_vel_x
+    mov ecx, 30000
+    repe cmpsd
+    jne bad
+    mov rsi, sim_sep_z
+    mov rdi, sim_vel_z
+    mov ecx, 30000
+    repe cmpsd
+    jne bad
+    mov edx, 1
+    jmp report
+bad:
+    xor edx, edx
+report:
+    invoke(test_report, "separation v2 equals scalar, crowded", rdx)
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+k_fold: [1]const f32 = { 0.015 }
+
 ; -> eax: number of failures
 run_tests: proc() -> i32 = {
     sub rsp, 40
@@ -225,6 +285,7 @@ run_tests: proc() -> i32 = {
     call test_pcg32
     call test_grid
     call test_determinism
+    call test_separate_v2
     mov eax, tests_failed
     add rsp, 40
     ret

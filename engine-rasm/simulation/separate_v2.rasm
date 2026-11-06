@@ -1,0 +1,156 @@
+; simulation/separate_v2.rasm: separation, 8 neighbours per step (AVX2)
+;
+; Same rule and the same result, bit for bit, as the scalar version (spec
+; 4.3): the neighbour runs are read 8 slots at a time, the distance test is a
+; vector compare, and only the lanes that hit are added, in ascending lane
+; order, so the sums see exactly the spec's sequence of additions. One branch
+; per block replaces one per neighbour. A block that would reach the 16
+; neighbour cap is finished lane by lane.
+;
+; The sorted columns are allocated with 16 slots of padding, so an 8-lane
+; read at the end of the population stays inside the allocation; padding
+; lanes are masked out by the run length.
+
+; lane masks: k_lane_valid + 32 * k has the first k lanes set (k = 0..8)
+k_lane_valid: [72]const u32[align(32)] = {
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0xFFFFFFFF, 0, 0, 0, 0, 0, 0, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0, 0, 0, 0, 0, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0, 0, 0, 0, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0, 0, 0, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0, 0, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0,
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+}
+
+sim_separate_v2: proc() = {
+    push rbp
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 120                       ; 8 + 64 + 120 = 192; lane scratch [rsp .. 63], xmm6..8 at [rsp + 64 ..]
+    movaps xmmword ptr [rsp + 64], xmm6
+    movaps xmmword ptr [rsp + 80], xmm7
+    movaps xmmword ptr [rsp + 96], xmm8
+    mov r12, sim_sorted_x
+    mov r13, sim_sorted_z
+    mov r14, sim_sorted_id
+    mov r15, sim_cell_start
+    mov ebx, sim_count
+    vbroadcastss ymm8, k_one[0]
+    xor esi, esi                       ; s
+entity:
+    cmp esi, ebx
+    jae all_done
+    vbroadcastss ymm0, dword ptr [r12 + rsi*4]     ; px in every lane
+    vbroadcastss ymm1, dword ptr [r13 + rsi*4]     ; pz
+    vxorps xmm2, xmm2, xmm2                        ; sx
+    vxorps xmm3, xmm3, xmm3                        ; sz
+    xor r10d, r10d                                 ; n
+    vaddss xmm4, xmm0, k_world_half[0]
+    vmulss xmm4, xmm4, k_inv_cell[0]
+    vcvttss2si eax, xmm4                           ; cx
+    vaddss xmm5, xmm1, k_world_half[0]
+    vmulss xmm5, xmm5, k_inv_cell[0]
+    vcvttss2si edi, xmm5                           ; cz
+    lea ecx, [rax - 1]
+    xor edx, edx
+    test ecx, ecx
+    cmovs ecx, edx
+    mov r11d, ecx                                  ; lo column
+    lea ecx, [rax + 1]
+    mov edx, GRID_DIM - 1
+    cmp ecx, edx
+    cmova ecx, edx
+    mov ebp, ecx                                   ; hi column
+    sub edi, 1
+    mov r9d, 3
+row:
+    cmp edi, GRID_DIM
+    jae next_row
+    mov ecx, edi
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov r8d, dword ptr [r15 + rcx*4]               ; b: first slot of the run
+    mov ecx, dword ptr [r15 + rdx*4]               ; end of the run
+block:
+    cmp r8d, ecx
+    jae next_row
+    vsubps ymm4, ymm0, ymmword ptr [r12 + r8*4]    ; dx
+    vsubps ymm5, ymm1, ymmword ptr [r13 + r8*4]    ; dz
+    vmulps ymm6, ymm4, ymm4
+    vmulps ymm7, ymm5, ymm5
+    vaddps ymm6, ymm6, ymm7                        ; d2
+    vcmpps ymm7, ymm6, ymm8, 17                    ; d2 < 1 (LT_OQ)
+    ; valid lanes: min(end - b, 8)
+    mov eax, ecx
+    sub eax, r8d
+    mov edx, 8
+    cmp eax, edx
+    cmova eax, edx
+    shl eax, 5
+    lea rdx, k_lane_valid
+    vandps ymm7, ymm7, ymmword ptr [rdx + rax]
+    vmovmskps eax, ymm7
+    ; not itself: lane s - b when 0 <= s - b < 8
+    mov edx, esi
+    sub edx, r8d
+    cmp edx, 8
+    jae not_self
+        btr eax, edx
+    not_self:
+    test eax, eax
+    jz next_block
+    ; contributions of every lane; only hit lanes are read back
+    vsubps ymm6, ymm8, ymm6                        ; w = 1 - d2
+    vmulps ymm4, ymm4, ymm6
+    vmulps ymm5, ymm5, ymm6
+    vmovups ymmword ptr [rsp], ymm4
+    vmovups ymmword ptr [rsp + 32], ymm5
+hit:
+    tzcnt edx, eax
+    blsr eax, eax
+    vaddss xmm2, xmm2, dword ptr [rsp + rdx*4]
+    vaddss xmm3, xmm3, dword ptr [rsp + rdx*4 + 32]
+    inc r10d
+    cmp r10d, SEP_MAX_NEIGH
+    je finished
+    test eax, eax
+    jnz hit
+next_block:
+    add r8d, 8
+    jmp block
+next_row:
+    inc edi
+    dec r9d
+    jnz row
+finished:
+    mov ecx, dword ptr [r14 + rsi*4]               ; i
+    mov rax, sim_sep_x
+    vmovss dword ptr [rax + rcx*4], xmm2
+    mov rax, sim_sep_z
+    vmovss dword ptr [rax + rcx*4], xmm3
+    inc esi
+    jmp entity
+all_done:
+    vzeroupper
+    movaps xmm6, xmmword ptr [rsp + 64]
+    movaps xmm7, xmmword ptr [rsp + 80]
+    movaps xmm8, xmmword ptr [rsp + 96]
+    add rsp, 120
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    pop rbp
+    ret
+}
