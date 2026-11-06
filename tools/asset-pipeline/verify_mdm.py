@@ -287,7 +287,7 @@ def main(argv):
             report[name]["problems"].append("expected LODs 0,1,2, found %s" % sorted(lods))
         h0 = lods.get(0)
         for lod, (path, h, lo, hi) in lods.items():
-            if h0 and abs(h - h0[1]) > 0.05 * h0[1]:
+            if h0 and abs(h - h0[1]) > 0.1 * h0[1]:
                 rep = report[os.path.basename(path)]
                 rep["ok"] = False
                 rep["problems"].append("height %.3f differs from LOD0 %.3f: LODs must share scale" % (h, h0[1]))

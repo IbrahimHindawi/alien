@@ -1,0 +1,192 @@
+{
+  "scuttler": [
+    {
+      "task_id": "ba5aba1c-db9e-430b-afa9-728ff4a6b0ba",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien bug creature, a roach or tick crossed with a machine: a low, wide, flat armoured carapace made of a few large angular chitin plates, a sharp wedge-shaped head pointing forward, exactly four thick angular legs splayed far out to the sides, a pale bone-coloured ridge along the spine, a cluster of glowing orange eyes on the front of the head. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridges, glowing orange eyes, nothing else. Large flat planes, hard edges, no small details, no greebles. Standing neutral pose, facing forward, single object, no base, no pedestal, no ground.",
+      "negative_prompt": "pedestal, base, ground plane, humanoid, smooth organic, fur, hair, wires, text, multiple creatures, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien bug creature, a roach or tick crossed with a machine: a low, wide, flat armoured carapace made of a few large angular chitin plates, a sharp wedge-shaped head pointing forward, exactly four thick angular legs splayed far out to the sides, a pale bone-coloured ridge along the spine, a cluster of glowing orange eyes on the front of the head. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridges, glowing orange eyes, nothing else. Large flat planes, hard edges, no small details, no greebles. Standing neutral pose, facing forward, single object, no base, no pedestal, no ground.",
+        "negative_prompt": "pedestal, base, ground plane, humanoid, smooth organic, fur, hair, wires, text, multiple creatures, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 300
+      },
+      "created": "2026-11-06T09:06:47+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:07:43.427876Z",
+      "cache": "cache/ba5aba1c-db9e-430b-afa9-728ff4a6b0ba/model.glb"
+    },
+    {
+      "task_id": "fcc20e2e-adcc-490e-bd17-53c4b3aff7ef",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien tick, seen as a game unit: a very low, flat, wide body (much wider than it is tall) made of a few large angular chitin plates, a sharp flat wedge-shaped head pointing straight forward, exactly four thick angular legs (two at the front, two at the back) splayed far out sideways like a tick, a pale bone-coloured ridge down the middle of the back, two glowing orange eyes on the front of the wedge head. No antennae, no tail, no extra legs. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridge, glowing orange eyes, nothing else. Large flat planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+      "negative_prompt": "antennae, six legs, eight legs, tail, wings, tall body, round smooth body, pedestal, base, ground plane, humanoid, fur, hair, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien tick, seen as a game unit: a very low, flat, wide body (much wider than it is tall) made of a few large angular chitin plates, a sharp flat wedge-shaped head pointing straight forward, exactly four thick angular legs (two at the front, two at the back) splayed far out sideways like a tick, a pale bone-coloured ridge down the middle of the back, two glowing orange eyes on the front of the wedge head. No antennae, no tail, no extra legs. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridge, glowing orange eyes, nothing else. Large flat planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+        "negative_prompt": "antennae, six legs, eight legs, tail, wings, tall body, round smooth body, pedestal, base, ground plane, humanoid, fur, hair, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 300
+      },
+      "created": "2026-11-06T09:12:19+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:13:09.773315Z",
+      "cache": "cache/fcc20e2e-adcc-490e-bd17-53c4b3aff7ef/model.glb"
+    },
+    {
+      "task_id": "6087f773-33db-409c-bbf7-05d1b034392c",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted four-legged alien crawler, like a flat armoured tick on four legs: a very low, flat, wide body made of a few large angular chitin plates, a sharp flat wedge-shaped head pointing straight forward, exactly four thick angular legs, one at each corner of the body like a table, splayed far out sideways, a pale bone-coloured ridge down the middle of the back, two glowing orange eyes on the front of the wedge head. Only four legs in total. No antennae, no mandibles, no tail. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridge, glowing orange eyes, nothing else. Large flat planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+      "negative_prompt": "spider, six legs, eight legs, antennae, mandibles, tail, wings, tall body, round smooth body, pedestal, base, ground plane, humanoid, fur, hair, text",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted four-legged alien crawler, like a flat armoured tick on four legs: a very low, flat, wide body made of a few large angular chitin plates, a sharp flat wedge-shaped head pointing straight forward, exactly four thick angular legs, one at each corner of the body like a table, splayed far out sideways, a pale bone-coloured ridge down the middle of the back, two glowing orange eyes on the front of the wedge head. Only four legs in total. No antennae, no mandibles, no tail. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridge, glowing orange eyes, nothing else. Large flat planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+        "negative_prompt": "spider, six legs, eight legs, antennae, mandibles, tail, wings, tall body, round smooth body, pedestal, base, ground plane, humanoid, fur, hair, text",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 300
+      },
+      "created": "2026-11-06T09:15:57+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:16:45.113908Z",
+      "cache": "cache/6087f773-33db-409c-bbf7-05d1b034392c/model.glb"
+    }
+  ],
+  "stalker": [
+    {
+      "task_id": "55eac2b4-4479-485a-8063-75bdedc31963",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien predator, insectoid and mechanical: a hunched, upright-ish body leaning forward, two very long flat blade-shaped forelimbs like scythes held forward and down, two digitigrade reverse-knee legs, a narrow angular head with glowing orange eyes, pale bone-coloured spikes along the hunched back. Colours: dark graphite grey chitin, gunmetal grey joints, pale bone blades and ridges, glowing orange eyes only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+      "negative_prompt": "pedestal, base, ground plane, human, robot, smooth organic, fur, hair, wires, tail, wings, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien predator, insectoid and mechanical: a hunched, upright-ish body leaning forward, two very long flat blade-shaped forelimbs like scythes held forward and down, two digitigrade reverse-knee legs, a narrow angular head with glowing orange eyes, pale bone-coloured spikes along the hunched back. Colours: dark graphite grey chitin, gunmetal grey joints, pale bone blades and ridges, glowing orange eyes only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+        "negative_prompt": "pedestal, base, ground plane, human, robot, smooth organic, fur, hair, wires, tail, wings, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 800
+      },
+      "created": "2026-11-06T09:07:56+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:08:53.571431Z",
+      "cache": "cache/55eac2b4-4479-485a-8063-75bdedc31963/model.glb"
+    }
+  ],
+  "seeker": [
+    {
+      "task_id": "23e68fcd-e696-485d-9386-79ecae093c5f",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted floating alien drone: a single large round armoured eye body with one big glowing orange lens on the front, surrounded by a flat angular ring and four blade-like fins, no legs, no arms. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no ground, no stand.",
+      "negative_prompt": "pedestal, base, stand, ground plane, legs, arms, cables, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted floating alien drone: a single large round armoured eye body with one big glowing orange lens on the front, surrounded by a flat angular ring and four blade-like fins, no legs, no arms. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no ground, no stand.",
+        "negative_prompt": "pedestal, base, stand, ground plane, legs, arms, cables, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 500
+      },
+      "created": "2026-11-06T09:09:02+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:09:57.720635Z",
+      "cache": "cache/23e68fcd-e696-485d-9386-79ecae093c5f/model.glb"
+    }
+  ],
+  "colossus": [
+    {
+      "task_id": "4ab6d47b-b829-47b9-a287-11334a25d129",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted colossal alien siege beast: a massive heavily armoured quadruped with four thick pillar legs, a broad armoured body, a tall stepped siege-tower structure rising from its back, a low armoured head, and a single large glowing red core in its chest. Colours: dark graphite grey armour plates, gunmetal grey legs and tower, pale bone ridges, glowing red core only. Huge flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground, no riders.",
+      "negative_prompt": "pedestal, base, ground plane, riders, people, flags, cloth, wires, text, bright colours, smooth organic",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted colossal alien siege beast: a massive heavily armoured quadruped with four thick pillar legs, a broad armoured body, a tall stepped siege-tower structure rising from its back, a low armoured head, and a single large glowing red core in its chest. Colours: dark graphite grey armour plates, gunmetal grey legs and tower, pale bone ridges, glowing red core only. Huge flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground, no riders.",
+        "negative_prompt": "pedestal, base, ground plane, riders, people, flags, cloth, wires, text, bright colours, smooth organic",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 3000
+      },
+      "created": "2026-11-06T09:10:06+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:10:58.876433Z",
+      "cache": "cache/4ab6d47b-b829-47b9-a287-11334a25d129/model.glb"
+    },
+    {
+      "task_id": "ecf465f1-6e47-4dca-906d-54d6628a4ddc",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted colossal alien siege beast that walks on four legs, like a giant armoured tortoise-elephant: a long horizontal armoured body carried on four thick pillar legs, one at each corner, a tall stepped siege-tower structure of angular armour plates rising from the middle of its back, a low armoured head at the front, and one large glowing red core set in the front of its chest under the head. Colours: dark graphite grey armour plates, gunmetal grey legs and tower, pale bone ridges, glowing red core only. Huge flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, not a robot, not humanoid, no base, no pedestal, no ground, no riders.",
+      "negative_prompt": "humanoid, robot, mech, bipedal, two legs, arms, hands, standing upright, riders, people, pedestal, base, ground plane, flags, cloth, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted colossal alien siege beast that walks on four legs, like a giant armoured tortoise-elephant: a long horizontal armoured body carried on four thick pillar legs, one at each corner, a tall stepped siege-tower structure of angular armour plates rising from the middle of its back, a low armoured head at the front, and one large glowing red core set in the front of its chest under the head. Colours: dark graphite grey armour plates, gunmetal grey legs and tower, pale bone ridges, glowing red core only. Huge flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, not a robot, not humanoid, no base, no pedestal, no ground, no riders.",
+        "negative_prompt": "humanoid, robot, mech, bipedal, two legs, arms, hands, standing upright, riders, people, pedestal, base, ground plane, flags, cloth, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 3000
+      },
+      "created": "2026-11-06T09:16:55+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:17:46.371783Z",
+      "cache": "cache/ecf465f1-6e47-4dca-906d-54d6628a4ddc/model.glb"
+    }
+  ],
+  "hero": [
+    {
+      "task_id": "51d844d1-c703-4fa4-967f-010506f3f5e2",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted lone armoured warrior, a sci-fi soldier in heavy angular armour: very broad heavy shoulder plates, a closed helmet with a single glowing cyan visor slit across the front, holding a large long rifle-like energy weapon in both hands pointing forward, sturdy legs. Colours: gunmetal grey armour, pale bone armour trim and shoulder edges, dark graphite undersuit, glowing cyan visor only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single figure, no base, no pedestal, no ground, no cape, no cloth.",
+      "negative_prompt": "pedestal, base, ground plane, cape, cloth, hair, face, generic robot, space marine, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted lone armoured warrior, a sci-fi soldier in heavy angular armour: very broad heavy shoulder plates, a closed helmet with a single glowing cyan visor slit across the front, holding a large long rifle-like energy weapon in both hands pointing forward, sturdy legs. Colours: gunmetal grey armour, pale bone armour trim and shoulder edges, dark graphite undersuit, glowing cyan visor only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single figure, no base, no pedestal, no ground, no cape, no cloth.",
+        "negative_prompt": "pedestal, base, ground plane, cape, cloth, hair, face, generic robot, space marine, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 2500
+      },
+      "created": "2026-11-06T09:11:04+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:11:55.193070Z",
+      "cache": "cache/51d844d1-c703-4fa4-967f-010506f3f5e2/model.glb"
+    },
+    {
+      "task_id": "c3042b53-22b7-4961-8f29-6f109aae13ac",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted lone armoured warrior with a distinctive silhouette: oversized angular shoulder plates much wider than the body, a narrow waist, sturdy legs, a closed angular helmet with a single horizontal glowing cyan visor slit across the front, holding a long heavy rifle-like energy weapon diagonally across the chest with both hands, barrel pointing up and forward. Gunmetal grey armour, pale bone armour trim on the shoulder plates and chest, dark graphite undersuit at the joints, glowing cyan visor only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single figure, no base, no pedestal, no ground, no cape, no cloth.",
+      "negative_prompt": "space marine, power armour mascot, bulky robot, mech, cape, cloth, hair, face, wires, pedestal, base, ground plane, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted lone armoured warrior with a distinctive silhouette: oversized angular shoulder plates much wider than the body, a narrow waist, sturdy legs, a closed angular helmet with a single horizontal glowing cyan visor slit across the front, holding a long heavy rifle-like energy weapon diagonally across the chest with both hands, barrel pointing up and forward. Gunmetal grey armour, pale bone armour trim on the shoulder plates and chest, dark graphite undersuit at the joints, glowing cyan visor only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single figure, no base, no pedestal, no ground, no cape, no cloth.",
+        "negative_prompt": "space marine, power armour mascot, bulky robot, mech, cape, cloth, hair, face, wires, pedestal, base, ground plane, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 2500
+      },
+      "created": "2026-11-06T09:17:53+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:19:17.893987Z",
+      "cache": "cache/c3042b53-22b7-4961-8f29-6f109aae13ac/model.glb"
+    }
+  ]
+}

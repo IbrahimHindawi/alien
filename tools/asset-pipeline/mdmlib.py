@@ -179,7 +179,13 @@ def normalize_lods(lods, spec):
     else:
         dy = -lo[1] * s
     off = (-c[0] * s, dy, -c[2] * s)
-    return [transform(l, s, off) for l in lods], {"scale": s, "offset": off}
+    out = [transform(l, s, off) for l in lods]
+    if "hover" not in spec:
+        # a decimated LOD may dip a little below the ground: put it back on it
+        for l in out[1:]:
+            for t in l:
+                t.p = tuple((p[0], max(0.0, p[1]), p[2]) for p in t.p)
+    return out, {"scale": s, "offset": off}
 
 
 # ---------------------------------------------------------------- tri dump

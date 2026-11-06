@@ -1,134 +1,407 @@
 {
   "_comment": "Asset concept specs for the MILLION DEAD pipeline. Coordinates: +Y up, model faces +Z, metres, origin on the ground under the centre. Budgets from shared/specs/mesh_format.md; palette and silhouettes from shared/specs/art_direction.md.",
   "palette": {
-    "graphite":    [36, 39, 43],
-    "gunmetal":    [74, 80, 88],
-    "bone":        [217, 210, 192],
-    "oxide":       [122, 75, 53],
-    "ground_dark": [26, 28, 31],
-    "cyan_glow":   [63, 230, 255],
-    "orange_glow": [255, 138, 42],
-    "red_glow":    [255, 46, 58]
+    "graphite": [
+      36,
+      39,
+      43
+    ],
+    "gunmetal": [
+      74,
+      80,
+      88
+    ],
+    "bone": [
+      217,
+      210,
+      192
+    ],
+    "oxide": [
+      122,
+      75,
+      53
+    ],
+    "ground_dark": [
+      26,
+      28,
+      31
+    ],
+    "cyan_glow": [
+      63,
+      230,
+      255
+    ],
+    "orange_glow": [
+      255,
+      138,
+      42
+    ],
+    "red_glow": [
+      255,
+      46,
+      58
+    ]
   },
-  "glow_roles": ["cyan_glow", "orange_glow", "red_glow"],
+  "glow_roles": [
+    "cyan_glow",
+    "orange_glow",
+    "red_glow"
+  ],
   "assets": {
     "scuttler": {
       "kind": "unit",
       "height": 0.7,
-      "budgets": [300, 120, 40],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        300,
+        120,
+        40
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "orange_glow",
       "emissive_hint": "the eye cluster on the front of the wedge head",
-      "emissive_region": {"z_min": 0.25, "y_min": 0.0, "y_max": 1.0},
-      "anim": {"mode": "legs", "leg_top": 0.55, "radial_min": 0.25, "radial_max": 0.55},
-      "aspect": {"width_over_height": [1.4, 4.0], "length_over_height": [1.2, 4.0]},
-      "prompt": "Ultra low poly faceted alien bug creature, a roach or tick crossed with a machine: a low, wide, flat armoured carapace made of a few large angular chitin plates, a sharp wedge-shaped head pointing forward, exactly four thick angular legs splayed far out to the sides, a pale bone-coloured ridge along the spine, a cluster of glowing orange eyes on the front of the head. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridges, glowing orange eyes, nothing else. Large flat planes, hard edges, no small details, no greebles. Standing neutral pose, facing forward, single object, no base, no pedestal, no ground.",
-      "negative_prompt": "pedestal, base, ground plane, humanoid, smooth organic, fur, hair, wires, text, multiple creatures, bright colours"
+      "emissive_region": {
+        "z_min": 0.25,
+        "y_min": 0.0,
+        "y_max": 1.0,
+        "x_max": 0.35
+      },
+      "anim": {
+        "mode": "legs",
+        "leg_top": 0.55,
+        "radial_min": 0.25,
+        "radial_max": 0.55
+      },
+      "aspect": {
+        "width_over_height": [
+          1.4,
+          4.0
+        ],
+        "length_over_height": [
+          1.2,
+          4.0
+        ]
+      },
+      "prompt": "Ultra low poly faceted four-legged alien crawler, like a flat armoured tick on four legs: a very low, flat, wide body made of a few large angular chitin plates, a sharp flat wedge-shaped head pointing straight forward, exactly four thick angular legs, one at each corner of the body like a table, splayed far out sideways, a pale bone-coloured ridge down the middle of the back, two glowing orange eyes on the front of the wedge head. Only four legs in total. No antennae, no mandibles, no tail. Colours: dark graphite grey carapace, gunmetal grey legs, pale bone ridge, glowing orange eyes, nothing else. Large flat planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+      "negative_prompt": "spider, six legs, eight legs, antennae, mandibles, tail, wings, tall body, round smooth body, pedestal, base, ground plane, humanoid, fur, hair, text",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "stalker": {
       "kind": "unit",
       "height": 1.8,
-      "budgets": [800, 300, 80],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        800,
+        300,
+        80
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "orange_glow",
       "emissive_hint": "the eyes on the front of the head",
-      "emissive_region": {"z_min": 0.1, "y_min": 0.65, "y_max": 1.0},
-      "anim": {"mode": "legs", "leg_top": 0.5, "radial_min": 0.0, "radial_max": 0.05},
-      "aspect": {"height_over_width": [1.0, 3.5], "length_over_height": [0.3, 1.2]},
-      "prompt": "Ultra low poly faceted alien predator, insectoid and mechanical: a hunched, upright-ish body leaning forward, two very long flat blade-shaped forelimbs like scythes held forward and down, two digitigrade reverse-knee legs, a narrow angular head with glowing orange eyes, pale bone-coloured spikes along the hunched back. Colours: dark graphite grey chitin, gunmetal grey joints, pale bone blades and ridges, glowing orange eyes only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
-      "negative_prompt": "pedestal, base, ground plane, human, robot, smooth organic, fur, hair, wires, tail, wings, text, bright colours"
+      "emissive_region": {
+        "z_min": 0.1,
+        "y_min": 0.65,
+        "y_max": 1.0,
+        "x_max": 0.3
+      },
+      "anim": {
+        "mode": "legs",
+        "leg_top": 0.5,
+        "radial_min": 0.0,
+        "radial_max": 0.05
+      },
+      "aspect": {
+        "height_over_width": [
+          1.0,
+          3.5
+        ],
+        "length_over_height": [
+          0.3,
+          1.2
+        ]
+      },
+      "prompt": "Ultra low poly faceted alien stalker, a lean insectoid predator like a praying mantis crossed with a raptor: it stands on two digitigrade reverse-knee legs bent backwards like a bird's, its narrow body hunched forward, and its two forearms are huge long flat scythe blades, each as long as its legs, held forward and down. A narrow wedge-shaped head with glowing orange eyes, a row of pale bone spikes along the hunched back. Colours: dark graphite grey chitin, gunmetal grey joints, pale bone blades and spikes, glowing orange eyes only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+      "negative_prompt": "gorilla, ape, humanoid, bulky, fat, robot, hands, fingers, small claws, tail, wings, pedestal, base, ground plane, fur, hair, wires, text, bright colours",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "seeker": {
       "kind": "unit",
       "height": 0.9,
       "hover": 1.4,
-      "budgets": [500, 200, 60],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        500,
+        200,
+        60
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "orange_glow",
       "emissive_hint": "the large lens eye on the front of the body",
-      "emissive_region": {"z_min": 0.2, "y_min": 0.0, "y_max": 1.0},
-      "anim": {"mode": "radial", "radial_min": 0.75, "radial_max": 1.25},
-      "aspect": {"width_over_height": [0.8, 2.6], "length_over_height": [0.6, 2.2]},
-      "prompt": "Ultra low poly faceted floating alien drone: a single large round armoured eye body with one big glowing orange lens on the front, surrounded by a flat angular ring and four blade-like fins, no legs, no arms. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no ground, no stand.",
-      "negative_prompt": "pedestal, base, stand, ground plane, legs, arms, cables, wires, text, bright colours"
+      "emissive_region": {
+        "z_min": 0.2,
+        "y_min": 0.0,
+        "y_max": 1.0,
+        "x_max": 0.6
+      },
+      "anim": {
+        "mode": "radial",
+        "radial_min": 0.75,
+        "radial_max": 1.25
+      },
+      "aspect": {
+        "width_over_height": [
+          0.8,
+          2.6
+        ],
+        "length_over_height": [
+          0.6,
+          2.2
+        ]
+      },
+      "prompt": "Ultra low poly faceted floating alien sentinel eye: a single round armoured sphere hovering in the air, one big glowing orange lens on its front, one large flat angular ring standing vertically around the sphere like a gimbal, and four short flat blade fins at the back of the sphere pointing backwards. Nothing hangs below it: no legs, no spikes underneath. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no stand, no ground.",
+      "negative_prompt": "legs, feet, spikes underneath, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "colossus": {
       "kind": "unit",
       "height": 7.0,
-      "budgets": [3000, 1000, 300],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        3000,
+        1000,
+        300
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "red_glow",
       "emissive_hint": "the glowing core in the armoured chest, front",
-      "emissive_region": {"z_min": 0.15, "y_min": 0.2, "y_max": 0.8},
-      "anim": {"mode": "legs", "leg_top": 0.38, "radial_min": 0.0, "radial_max": 0.05},
-      "aspect": {"width_over_height": [0.4, 1.4], "length_over_height": [0.6, 1.6]},
-      "prompt": "Ultra low poly faceted colossal alien siege beast: a massive heavily armoured quadruped with four thick pillar legs, a broad armoured body, a tall stepped siege-tower structure rising from its back, a low armoured head, and a single large glowing red core in its chest. Colours: dark graphite grey armour plates, gunmetal grey legs and tower, pale bone ridges, glowing red core only. Huge flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground, no riders.",
-      "negative_prompt": "pedestal, base, ground plane, riders, people, flags, cloth, wires, text, bright colours, smooth organic"
+      "emissive_region": {
+        "z_min": 0.15,
+        "y_min": 0.2,
+        "y_max": 0.8,
+        "x_max": 0.45
+      },
+      "anim": {
+        "mode": "legs",
+        "leg_top": 0.38,
+        "radial_min": 0.0,
+        "radial_max": 0.05
+      },
+      "aspect": {
+        "width_over_height": [
+          0.4,
+          1.4
+        ],
+        "length_over_height": [
+          0.6,
+          1.6
+        ]
+      },
+      "prompt": "Ultra low poly faceted colossal alien siege beast that walks on four legs, like a giant armoured tortoise-elephant: a long horizontal armoured body carried on four thick pillar legs, one at each corner, a tall stepped siege-tower structure of angular armour plates rising from the middle of its back, a low armoured head at the front, and one large glowing red core set in the front of its chest under the head. Colours: dark graphite grey armour plates, gunmetal grey legs and tower, pale bone ridges, glowing red core only. Huge flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, not a robot, not humanoid, no base, no pedestal, no ground, no riders.",
+      "negative_prompt": "humanoid, robot, mech, bipedal, two legs, arms, hands, standing upright, riders, people, pedestal, base, ground plane, flags, cloth, wires, text, bright colours",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "hero": {
       "kind": "unit",
       "height": 1.9,
-      "budgets": [2500, 900, 300],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        2500,
+        900,
+        300
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "cyan_glow",
       "emissive_hint": "the visor across the front of the helmet",
-      "emissive_region": {"z_min": 0.0, "y_min": 0.8, "y_max": 1.0},
-      "anim": {"mode": "none"},
-      "aspect": {"height_over_width": [1.2, 3.2], "length_over_height": [0.2, 0.9]},
-      "prompt": "Ultra low poly faceted lone armoured warrior, a sci-fi soldier in heavy angular armour: very broad heavy shoulder plates, a closed helmet with a single glowing cyan visor slit across the front, holding a large long rifle-like energy weapon in both hands pointing forward, sturdy legs. Colours: gunmetal grey armour, pale bone armour trim and shoulder edges, dark graphite undersuit, glowing cyan visor only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single figure, no base, no pedestal, no ground, no cape, no cloth.",
-      "negative_prompt": "pedestal, base, ground plane, cape, cloth, hair, face, generic robot, space marine, wires, text, bright colours"
+      "emissive_region": {
+        "z_min": 0.0,
+        "y_min": 0.8,
+        "y_max": 1.0,
+        "x_max": 0.35
+      },
+      "anim": {
+        "mode": "none"
+      },
+      "aspect": {
+        "height_over_width": [
+          1.2,
+          3.2
+        ],
+        "length_over_height": [
+          0.2,
+          0.9
+        ]
+      },
+      "prompt": "Ultra low poly faceted lone armoured warrior with a distinctive silhouette: oversized angular shoulder plates much wider than the body, a narrow waist, sturdy legs, a closed angular helmet with a single horizontal glowing cyan visor slit across the front, holding a long heavy rifle-like energy weapon diagonally across the chest with both hands, barrel pointing up and forward. Gunmetal grey armour, pale bone armour trim on the shoulder plates and chest, dark graphite undersuit at the joints, glowing cyan visor only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single figure, no base, no pedestal, no ground, no cape, no cloth.",
+      "negative_prompt": "space marine, power armour mascot, bulky robot, mech, cape, cloth, hair, face, wires, pedestal, base, ground plane, text, bright colours",
+      "tone": {
+        "dark": 0.2,
+        "bone": 0.15
+      }
     },
     "monolith": {
       "kind": "prop",
       "height": 6.0,
-      "budgets": [1500, 500, 150],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        1500,
+        500,
+        150
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "orange_glow",
       "emissive_hint": "a vertical seam of light on the front face",
-      "emissive_region": {"z_min": 0.0, "y_min": 0.2, "y_max": 0.95},
-      "anim": {"mode": "none"},
-      "aspect": {"height_over_width": [1.5, 8.0]},
+      "emissive_region": {
+        "z_min": 0.0,
+        "y_min": 0.2,
+        "y_max": 0.95,
+        "x_max": 0.3
+      },
+      "anim": {
+        "mode": "none"
+      },
+      "aspect": {
+        "height_over_width": [
+          1.5,
+          8.0
+        ]
+      },
       "prompt": "Ultra low poly faceted alien monolith: a tall angular slab of dark stone-like alien material, slightly tapered and bent, carved with a few large chitin-like plates, a single narrow vertical seam of glowing orange light on its front face, bone-coloured ribs at its edges. Colours: dark graphite grey, gunmetal grey, pale bone ribs, glowing orange seam only. Large flat planes, hard edges, no greebles. Single object, no base platform, no ground.",
-      "negative_prompt": "pedestal, base, ground plane, text, runes, people, bright colours"
+      "negative_prompt": "pedestal, base, ground plane, text, runes, people, bright colours",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "pylon": {
       "kind": "prop",
       "height": 9.0,
-      "budgets": [1500, 500, 150],
-      "colors": ["graphite", "gunmetal", "oxide"],
+      "budgets": [
+        1500,
+        500,
+        150
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "oxide"
+      ],
       "glow": null,
       "emissive_hint": "none: a dead human structure",
       "emissive_region": null,
-      "anim": {"mode": "none"},
-      "aspect": {"height_over_width": [1.5, 8.0]},
+      "anim": {
+        "mode": "none"
+      },
+      "aspect": {
+        "height_over_width": [
+          1.5,
+          8.0
+        ]
+      },
       "prompt": "Ultra low poly faceted ruined industrial power pylon: a broken steel lattice tower made of a few thick angular beams, bent and snapped near the top, rusted. Colours: gunmetal grey steel, dark graphite grey, rust brown oxide patches. Large flat planes, thick beams, hard edges, no thin wires, no cables, no greebles. Single object, no ground, no base platform.",
-      "negative_prompt": "wires, cables, thin lines, ground plane, base, people, text, bright colours"
+      "negative_prompt": "wires, cables, thin lines, ground plane, base, people, text, bright colours",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "rock_spire": {
       "kind": "prop",
       "height": 8.0,
-      "budgets": [1500, 500, 150],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        1500,
+        500,
+        150
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": null,
       "emissive_hint": "none",
       "emissive_region": null,
-      "anim": {"mode": "none"},
-      "aspect": {"height_over_width": [1.3, 8.0]},
+      "anim": {
+        "mode": "none"
+      },
+      "aspect": {
+        "height_over_width": [
+          1.3,
+          8.0
+        ]
+      },
       "prompt": "Ultra low poly faceted alien rock spire: a tall jagged pointed rock column made of a few large angular crystalline facets, slightly leaning, with pale bone-coloured mineral bands. Colours: dark graphite grey rock, gunmetal grey facets, pale bone bands. Large flat planes, hard edges, no small rocks, no greebles. Single object, no ground, no base platform.",
-      "negative_prompt": "ground plane, base, grass, trees, people, small rocks, bright colours"
+      "negative_prompt": "ground plane, base, grass, trees, people, small rocks, bright colours",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     },
     "hive_spire": {
       "kind": "prop",
       "height": 10.0,
-      "budgets": [1500, 500, 150],
-      "colors": ["graphite", "gunmetal", "bone"],
+      "budgets": [
+        1500,
+        500,
+        150
+      ],
+      "colors": [
+        "graphite",
+        "gunmetal",
+        "bone"
+      ],
       "glow": "orange_glow",
       "emissive_hint": "glowing orange pores near the top",
-      "emissive_region": {"z_min": -10.0, "y_min": 0.6, "y_max": 1.0},
-      "anim": {"mode": "none"},
-      "aspect": {"height_over_width": [1.5, 8.0]},
+      "emissive_region": {
+        "z_min": -10.0,
+        "y_min": 0.6,
+        "y_max": 1.0,
+        "x_max": 1.0
+      },
+      "anim": {
+        "mode": "none"
+      },
+      "aspect": {
+        "height_over_width": [
+          1.5,
+          8.0
+        ]
+      },
       "prompt": "Ultra low poly faceted alien hive spire: a tall twisted organic-mechanical tower of angular chitin plates and bone ribs, tapering to a sharp point, with a few glowing orange pores near the top. Colours: dark graphite grey chitin, gunmetal grey plates, pale bone ribs, glowing orange pores only. Large flat angular planes, hard edges, no greebles. Single object, no ground, no base platform.",
-      "negative_prompt": "ground plane, base, people, creatures, text, bright colours, smooth"
+      "negative_prompt": "ground plane, base, people, creatures, text, bright colours, smooth",
+      "tone": {
+        "dark": 0.5,
+        "bone": 0.1
+      }
     }
   }
 }

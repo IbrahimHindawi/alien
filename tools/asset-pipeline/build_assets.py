@@ -76,10 +76,10 @@ def build_tripo(name, spec, sel):
     glb = tripo.cached_model(sel["task_id"])
     if not glb:
         raise RuntimeError("model for task %s is not in the cache; run without --no-generate" % sel["task_id"])
-    work = os.path.join(CACHE, "work", name)
+    work = os.path.join(CACHE, "work", "%s-%s" % (name, sel["task_id"][:8]))
     os.makedirs(work, exist_ok=True)
     cfg = {"name": name, "spec": spec, "palette": mdmlib.load_specs()["palette"],
-           "yaw_deg": sel.get("yaw_deg", 0), "process": sel.get("process", {})}
+           "yaw_deg": sel.get("yaw_deg", -90), "process": sel.get("process", {})}
     cfg_path = os.path.join(work, "config.json")
     save_json(cfg_path, cfg)
     out = run_blender("blender_process.py", [glb, cfg_path, work])
@@ -144,10 +144,21 @@ def main():
                     help="spend up to N new Tripo generations per listed asset (adds attempts, selects nothing)")
     ap.add_argument("--procedural", action="store_true", help="ignore selection.json; build placeholders")
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--candidate", metavar="NAME=TASK_ID[:YAW]",
+                    help="review a Tripo task: build it into cache/candidates/ (meshes and previews), "
+                         "leaving shared/assets and provenance untouched")
     a = ap.parse_args()
 
+    global MESHES, PREVIEWS
     specs = mdmlib.load_specs()
     selection = load_json(SELECTION, {})
+    if a.candidate:
+        cname, rest = a.candidate.split("=", 1)
+        tid, _, yaw = rest.partition(":")
+        selection = {cname: {"source": "tripo", "task_id": tid, **({"yaw_deg": float(yaw)} if yaw else {})}}
+        a.only = cname
+        cdir = os.path.join(CACHE, "candidates", "%s-%s" % (cname, tid[:8]))
+        MESHES, PREVIEWS = os.path.join(cdir, "meshes"), os.path.join(cdir, "previews")
     names = [n for n in specs["assets"]]
     if a.only:
         names = [n.strip() for n in a.only.split(",")]
@@ -198,12 +209,17 @@ def main():
                          "built": datetime.date.today().isoformat()}
         built.append(name)
 
-    v = subprocess.run([sys.executable, os.path.join(HERE, "verify_mdm.py")] + built)
+    files = [os.path.join(MESHES, "%s.lod%d.mdm" % (n, d)) for n in built for d in range(3)]
+    v = subprocess.run([sys.executable, os.path.join(HERE, "verify_mdm.py")] + files)
     if not a.no_render and built:
         render(built)
     for n in built:
         results[n]["validated"] = v.returncode == 0
-    write_provenance(results)
+    if a.candidate:
+        print("candidate previews in", PREVIEWS)
+        print(json.dumps({n: r["process_report"] for n, r in results.items()}, indent=1)[:3000])
+    else:
+        write_provenance(results)
     return v.returncode
 
 

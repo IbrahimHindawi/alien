@@ -1,0 +1,39 @@
+{
+  "status": "unverified",
+  "summary": "Commercial use of the Tripo outputs depends on the account being a paid account, which could not be confirmed. Treat every Tripo-sourced mesh as NOT cleared for commercial release until the account owner confirms the tier (paid subscription, or API credits bought rather than granted).",
+  "checked": "2026-11-06",
+  "sources": [
+    {
+      "url": "https://developers.tripo3d.ai/en/terms",
+      "fetched": "2026-11-06",
+      "last_updated_on_page": "2025-07-11",
+      "findings": [
+        "s3.2: Outputs may be used 'for lawful commercial or non-commercial purposes', but not to build models or services that directly compete with Holymolly (Tripo's operator); no guarantee of exclusivity.",
+        "s5.2.1 Free users: 'Tripo retains all rights, including without limitation the rights to use, copy, reproduce, modify' the Inputs and Outputs.",
+        "s5.2.2 Paid users: 'generally have all rights' over Inputs and Outputs, subject to a royalty-free, perpetual, irrevocable, worldwide, non-exclusive licence to the company; the company will not train on them.",
+        "s6.4: API Credits are 'intended primarily for business and professional use' and are 'prepaid and non-refundable once purchased'.",
+        "No attribution requirement is stated for Outputs."
+      ]
+    },
+    {
+      "url": "https://developers.tripo3d.ai/en/pricing",
+      "fetched": "2026-11-06",
+      "findings": [
+        "Pay-as-you-go API credits, 1 credit = 0.01 USD; text-to-3D 10 credits untextured, 20 with standard texture (H-series figures; P-series tasks here were charged 40 credits each).",
+        "Says nothing about licensing or commercial use."
+      ]
+    },
+    {
+      "url": "https://www.tripo3d.ai/help/privacy-policy/how-to-use-tripo-models-commercially",
+      "fetched": "not fetched: the site answered HTTP 403 to automated requests",
+      "findings": [
+        "A search-engine summary of this official help page says commercial use requires a paid plan and that free users' outputs belong to Tripo (terms s5.2.1). Not read directly; listed so it can be checked by hand."
+      ]
+    }
+  ],
+  "account": {
+    "api": "https://openapi.tripo3d.ai/v3 (v2 at https://api.tripo3d.ai/v2/openapi also answered)",
+    "balance_at_start": 6280,
+    "tier": "unverified: the API exposes a credit balance only, not the plan. A prepaid API credit balance suggests purchased credits (s6.4), but granted or trial credits cannot be ruled out."
+  }
+}
