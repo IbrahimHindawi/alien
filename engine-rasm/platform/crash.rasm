@@ -1,0 +1,86 @@
+; platform/crash.rasm: crash diagnostics
+;
+; rasm emits no unwind tables (by design: spec R8), so Windows cannot walk a
+; rasm stack and an unhandled-exception filter is never reached. A vectored
+; handler runs first, before any unwinding: it reports faults whose address is
+; inside this executable's image and ends the process with the exception
+; code. Faults elsewhere (drivers probing memory under their own SEH) are left
+; alone. tools/symbolize.py turns the printed rva into a .rasm line.
+
+crash_module: u64 = 0
+crash_module_end: u64 = 0
+crash_info: *EXCEPTION_POINTERS = 0
+
+crash_install: proc() = {
+    sub rsp, 40
+    invoke(GetModuleHandleA, 0)
+    mov crash_module, rax
+    mov ecx, dword ptr [rax + 0x3C]            ; e_lfanew
+    mov ecx, dword ptr [rax + rcx + 0x50]      ; OptionalHeader.SizeOfImage
+    add rax, rcx
+    mov crash_module_end, rax
+    invoke(AddVectoredExceptionHandler, 1, crash_handler&)
+    add rsp, 40
+    ret
+}
+
+; rcx: EXCEPTION_POINTERS -> eax: EXCEPTION_CONTINUE_SEARCH (0) for faults not ours
+crash_handler: proc(info: *EXCEPTION_POINTERS) -> i32 = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32
+    mov crash_info, rcx
+    mov rbx, [rcx].EXCEPTION_POINTERS.ExceptionRecord
+    mov esi, [rbx].EXCEPTION_RECORD.ExceptionCode
+    mov rdi, [rbx].EXCEPTION_RECORD.ExceptionAddress
+    ; only hard faults
+    cmp esi, 0xC0000005
+    je fatal
+    cmp esi, 0xC000001D
+    je fatal
+    cmp esi, 0xC0000094
+    je fatal
+    cmp esi, 0xC00000FD
+    je fatal
+    cmp esi, 0xC0000096
+    je fatal
+    jmp pass
+fatal:
+    mov r9, rdi
+    sub r9, crash_module
+    mov r8, rdi
+    mov edx, esi
+    invoke(print, "CRASH code=%08x address=%p rva=%x\n", rdx, r8, r9)
+    cmp esi, 0xC0000005
+    jne exit
+    mov rdx, qword ptr [rbx].EXCEPTION_RECORD.ExceptionInformation[0]
+    mov r8, qword ptr [rbx].EXCEPTION_RECORD.ExceptionInformation[1]
+    invoke(print, "  access violation: kind %u (0 read, 1 write, 8 execute) at %p\n", rdx, r8)
+exit:
+    ; heuristic backtrace: values on the stack that point into this image
+    mov rbx, crash_info
+    mov rbx, [rbx].EXCEPTION_POINTERS.ContextRecord
+    mov rbx, [rbx].CONTEXT.Rsp
+    mov edi, 512
+scan:
+    mov rdx, qword ptr [rbx]
+    cmp rdx, crash_module
+    jb next
+    cmp rdx, crash_module_end
+    jae next
+    sub rdx, crash_module
+    invoke(print, "  stack rva=%x\n", rdx)
+next:
+    add rbx, 8
+    dec edi
+    jnz scan
+    invoke(ExitProcess, rsi)
+pass:
+    xor eax, eax
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}

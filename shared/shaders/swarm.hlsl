@@ -88,7 +88,7 @@ float4 ps_unit(VsOut i) : SV_Target
 {
     float3 n = normalize(i.normal);
     float ndl = saturate(dot(n, light_dir.xyz));
-    float3 albedo = i.color.rgb;
+    float3 albedo = i.color.rgb * i.color.rgb;   // vertex colours are sRGB; the target is an sRGB view
     float3 key = float3(1.0, 0.86, 0.72) * ndl;
     float3 sky = lerp(float3(0.10, 0.09, 0.08), float3(0.18, 0.22, 0.32), n.y * 0.5 + 0.5) * light_dir.w;
     float3 c = albedo * (key + sky);
@@ -111,7 +111,7 @@ VsOut vs_ground(uint id : SV_VertexID)
     o.world = float3(c.x, 0.0, c.y);
     o.clip = mul(float4(o.world, 1.0), view_proj);
     o.normal = float3(0.0, 1.0, 0.0);
-    o.color = float4(0.10, 0.105, 0.115, 0.0);
+    o.color = float4(0.010, 0.011, 0.013, 0.0);  // linear
     return o;
 }
 
@@ -124,7 +124,7 @@ float4 ps_ground(VsOut i) : SV_Target
     float3 c = i.color.rgb * (0.85 + 0.3 * h);
     float2 g = abs(frac(p / 8.0) - 0.5);
     float grid_line = saturate(1.0 - min(g.x, g.y) * 40.0);
-    c += grid_line * float3(0.03, 0.05, 0.06);
+    c += grid_line * float3(0.004, 0.008, 0.010);
     float ndl = saturate(light_dir.y);
     c *= 0.6 + 0.6 * ndl;
     c = apply_fog(c, i.world);

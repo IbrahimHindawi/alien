@@ -1,0 +1,141 @@
+; renderer/math.rasm: SSE vectors and row-major 4x4 matrices
+;
+; Row-vector convention, as the shaders use it: p' = p * M, so a matrix's
+; rows are its basis vectors and its last row the translation. Vectors are
+; 16 bytes (x, y, z, w) in memory; procs take pointers.
+
+; shufps immediates for cross products
+#define SHUF_YZX 0xC9
+#define SHUF_ZXY 0xD2
+
+m_identity: [16]const f32[align(16)] = { 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 }
+k_xyz_mask: [4]const u32[align(16)] = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0 }
+
+; rcx: out, rdx: a, r8: b (out may not alias b). out = a * b
+m4_mul: proc(out: *f32, a: *f32, b: *f32) = {
+    movaps xmm4, xmmword ptr [r8]
+    movaps xmm5, xmmword ptr [r8 + 16]
+    vmovaps xmm2, xmmword ptr [r8 + 32]
+    vmovaps xmm3, xmmword ptr [r8 + 48]
+    mov eax, 4
+row:
+    vbroadcastss xmm0, dword ptr [rdx]
+    vmulps xmm0, xmm0, xmm4
+    vbroadcastss xmm1, dword ptr [rdx + 4]
+    vmulps xmm1, xmm1, xmm5
+    vaddps xmm0, xmm0, xmm1
+    vbroadcastss xmm1, dword ptr [rdx + 8]
+    vmulps xmm1, xmm1, xmm2
+    vaddps xmm0, xmm0, xmm1
+    vbroadcastss xmm1, dword ptr [rdx + 12]
+    vmulps xmm1, xmm1, xmm3
+    vaddps xmm0, xmm0, xmm1
+    vmovaps xmmword ptr [rcx], xmm0
+    add rdx, 16
+    add rcx, 16
+    dec eax
+    jnz row
+    ret
+}
+
+; xmm0: a vector (w ignored) -> xmm0: it normalised, w = 0
+v3_normalize: proc() = {
+    vandps xmm0, xmm0, xmmword ptr k_xyz_mask
+    vdpps xmm1, xmm0, xmm0, 0x7F
+    vsqrtps xmm1, xmm1
+    vdivps xmm0, xmm0, xmm1
+    ret
+}
+
+; xmm0 = cross(xmm0, xmm1); clobbers xmm2, xmm3
+v3_cross: proc() = {
+    vshufps xmm2, xmm0, xmm0, SHUF_YZX
+    vshufps xmm3, xmm1, xmm1, SHUF_ZXY
+    vmulps xmm2, xmm2, xmm3
+    vshufps xmm3, xmm0, xmm0, SHUF_ZXY
+    vshufps xmm0, xmm1, xmm1, SHUF_YZX
+    vmulps xmm0, xmm3, xmm0
+    vsubps xmm0, xmm2, xmm0
+    ret
+}
+
+; rcx: out view matrix, rdx: eye, r8: target, r9: up. Also writes the basis to
+; [out + 64 ..]: x axis, y axis, z axis (forward), each 16 bytes, so the
+; caller has the camera frame for rays (out must have room for 28 floats).
+look_at_lh: proc(out: *f32, eye: *f32, target: *f32, up: *f32) = {
+    push rbx
+    sub rsp, 64                        ; 8 + 8 + 64 = 80; xmm6, xmm7 at [rsp + 32], [rsp + 48]
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    mov rbx, rcx
+    movaps xmm0, xmmword ptr [r8]
+    vsubps xmm0, xmm0, xmmword ptr [rdx]
+    call v3_normalize
+    movaps xmm6, xmm0                  ; z
+    movaps xmm0, xmmword ptr [r9]
+    movaps xmm1, xmm6
+    call v3_cross                      ; up x z
+    call v3_normalize
+    movaps xmm7, xmm0                  ; x
+    movaps xmm0, xmm6
+    movaps xmm1, xmm7
+    call v3_cross                      ; y = z x x
+    movaps xmmword ptr [rbx + 64], xmm7
+    movaps xmmword ptr [rbx + 80], xmm0
+    movaps xmmword ptr [rbx + 96], xmm6
+    ; transpose the basis into the rotation part
+    vmovss dword ptr [rbx], xmm7
+    vextractps dword ptr [rbx + 16], xmm7, 1
+    vextractps dword ptr [rbx + 32], xmm7, 2
+    vmovss dword ptr [rbx + 4], xmm0
+    vextractps dword ptr [rbx + 20], xmm0, 1
+    vextractps dword ptr [rbx + 36], xmm0, 2
+    vmovss dword ptr [rbx + 8], xmm6
+    vextractps dword ptr [rbx + 24], xmm6, 1
+    vextractps dword ptr [rbx + 40], xmm6, 2
+    xor eax, eax
+    mov dword ptr [rbx + 12], eax
+    mov dword ptr [rbx + 28], eax
+    mov dword ptr [rbx + 44], eax
+    ; translation: -dot(axis, eye)
+    movaps xmm1, xmmword ptr [rdx]
+    vandps xmm1, xmm1, xmmword ptr k_xyz_mask
+    vdpps xmm2, xmm7, xmm1, 0x71
+    vdpps xmm3, xmm0, xmm1, 0x71
+    vdpps xmm4, xmm6, xmm1, 0x71
+    vxorps xmm5, xmm5, xmm5
+    vsubss xmm2, xmm5, xmm2
+    vsubss xmm3, xmm5, xmm3
+    vsubss xmm4, xmm5, xmm4
+    vmovss dword ptr [rbx + 48], xmm2
+    vmovss dword ptr [rbx + 52], xmm3
+    vmovss dword ptr [rbx + 56], xmm4
+    mov dword ptr [rbx + 60], 0x3F800000
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    add rsp, 64
+    pop rbx
+    ret
+}
+
+; rcx: out, xmm1: 1 / tan(fovy / 2), xmm2: aspect (w / h), xmm3: near, [rsp + 40]: far (f32)
+perspective_lh: proc(out: *f32, f: f32, aspect: f32, near: f32, far: f32) = {
+    vxorps xmm0, xmm0, xmm0
+    vmovups xmmword ptr [rcx], xmm0
+    vmovups xmmword ptr [rcx + 16], xmm0
+    vmovups xmmword ptr [rcx + 32], xmm0
+    vmovups xmmword ptr [rcx + 48], xmm0
+    vdivss xmm0, xmm1, xmm2
+    vmovss dword ptr [rcx], xmm0              ; f / aspect
+    vmovss dword ptr [rcx + 20], xmm1         ; f
+    vmovss xmm4, dword ptr [rsp + 40]         ; far
+    vsubss xmm5, xmm4, xmm3                   ; far - near
+    vdivss xmm0, xmm4, xmm5                   ; far / (far - near)
+    vmovss dword ptr [rcx + 40], xmm0
+    mov dword ptr [rcx + 44], 0x3F800000      ; w = z
+    vmulss xmm0, xmm0, xmm3
+    vxorps xmm5, xmm5, xmm5
+    vsubss xmm0, xmm5, xmm0                   ; -near * far / (far - near)
+    vmovss dword ptr [rcx + 56], xmm0
+    ret
+}

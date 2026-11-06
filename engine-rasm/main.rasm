@@ -12,7 +12,12 @@ import "include/calls.rasm"
 import "include/print.rasm"
 import "memory/arena.rasm"
 import "platform/platform.rasm"
+import "platform/crash.rasm"
 import "simulation/sim.rasm"
+import "renderer/math.rasm"
+import "renderer/camera.rasm"
+import "renderer/render.rasm"
+import "gameplay/hero.rasm"
 import "tests/tests.rasm"
 
 ; 768 MiB reserved and committed for the run
@@ -24,6 +29,21 @@ bench_cyc_grid: u64 = 0
 bench_cyc_sep: u64 = 0
 bench_cyc_int: u64 = 0
 bench_ticks_done: u32 = 0
+
+; interactive loop
+frame_index: u32 = 0
+loop_last: u64 = 0
+tick_accum: u64 = 0                    ; QPC ticks not yet simulated
+tick_qpc: u64 = 0                      ; QPC ticks per simulation tick
+stats_last: u64 = 0
+stats_frames: u32 = 0
+stats_sim_qpc: u64 = 0
+stats_frame_qpc: u64 = 0
+stats_inst_cycles: u64 = 0
+title_buffer: [256]u8 = {}
+k_tick_seconds: const f32 = 0.016666668
+
+#define MAX_TICKS_PER_FRAME 4
 
 ; Headless: init, run opt_bench_ticks ticks with the bench input, print the
 ; time per tick, cycles per entity per phase, and the state hash.
@@ -102,12 +122,188 @@ finished:
     ret
 }
 
+; Update the window title with the averages since the last update.
+update_title: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    sub rsp, 80                        ; 8 + 40 + 80 = 128
+    mov ebx, stats_frames
+    test ebx, ebx
+    jz done
+    invoke(ticks_to_us, stats_frame_qpc)
+    xor edx, edx
+    div rbx
+    mov rsi, rax                       ; frame us
+    invoke(ticks_to_us, stats_sim_qpc)
+    xor edx, edx
+    div rbx
+    mov rdi, rax                       ; sim us per frame
+    mov rax, stats_inst_cycles
+    xor edx, edx
+    div rbx
+    xor edx, edx
+    mov ecx, 1000
+    div rcx
+    mov r12, rax                       ; instance kcycles per frame
+    mov eax, instance_counts[0]
+    add eax, instance_counts[1]
+    add eax, instance_counts[2]
+    mov r13, rax                       ; visible
+    mov eax, sim_count
+    mov qword ptr [rsp + 32], rax
+    mov qword ptr [rsp + 40], rsi
+    mov qword ptr [rsp + 48], rdi
+    mov qword ptr [rsp + 56], r12
+    mov qword ptr [rsp + 64], r13
+    lea rcx, title_buffer
+    lea rdx, title_fmt
+    mov r8, qword ptr [rsp + 32]
+    mov r9, qword ptr [rsp + 40]
+    mov rax, qword ptr [rsp + 48]
+    mov qword ptr [rsp + 32], rax
+    mov rax, qword ptr [rsp + 56]
+    mov qword ptr [rsp + 40], rax
+    mov rax, qword ptr [rsp + 64]
+    mov qword ptr [rsp + 48], rax
+    call wsprintfA
+    invoke(SetWindowTextA, window, title_buffer&)
+    cmp opt_frames, 0
+    je no_stdout
+        invoke(print, "%s\n", title_buffer&)
+    no_stdout:
+    mov stats_frames, 0
+    mov stats_sim_qpc, 0
+    mov stats_frame_qpc, 0
+    mov stats_inst_cycles, 0
+done:
+    add rsp, 80
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+title_fmt: [96]const u8 = "MILLION DEAD [RASM]  entities %u  frame %u us  sim %u us  instances %u kcyc  visible %u"
+
+; The game: window, renderer, fixed 60 Hz simulation, render every frame.
+run_game: proc() -> i32 = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    call window_create
+    test eax, eax
+    jz failed
+    call render_init
+    test eax, eax
+    jz failed
+    mov ecx, opt_entities
+    mov edx, opt_seed
+    call sim_init
+    mov rax, qpc_frequency
+    xor edx, edx
+    mov ecx, 60
+    div rcx
+    mov tick_qpc, rax
+    call clock_ticks
+    mov loop_last, rax
+    mov stats_last, rax
+frame:
+    call pump_messages
+    test eax, eax
+    jz finished
+    lea rax, keys_pressed
+    cmp byte ptr [rax + VK_ESCAPE], 0
+    je no_escape
+        invoke(DestroyWindow, window)
+    no_escape:
+    call clock_ticks
+    mov rbx, rax
+    sub rax, loop_last
+    mov loop_last, rbx
+    add stats_frame_qpc, rax
+    ; ticks to run: one per frame in a bounded run (deterministic), else by the clock
+    mov esi, 1
+    cmp opt_frames, 0
+    jne ticks_known
+        add tick_accum, rax
+        xor esi, esi
+        count:
+        mov rax, tick_accum
+        cmp rax, tick_qpc
+        jb ticks_known
+        sub rax, tick_qpc
+        mov tick_accum, rax
+        inc esi
+        cmp esi, MAX_TICKS_PER_FRAME
+        jb count
+        mov tick_accum, 0              ; too far behind: drop the backlog
+    ticks_known:
+    call clock_ticks
+    mov rdi, rax
+simulate:
+    test esi, esi
+    jz simulated
+    call hero_read_keys
+    mov ecx, eax
+    call sim_step
+    vmovss xmm0, render_time
+    vaddss xmm0, xmm0, k_tick_seconds
+    vmovss render_time, xmm0
+    dec esi
+    jmp simulate
+simulated:
+    call clock_ticks
+    sub rax, rdi
+    add stats_sim_qpc, rax
+    call camera_update
+    call hero_update_matrix
+    call render_frame
+    mov rax, render_instance_cycles
+    add stats_inst_cycles, rax
+    call frame_input_end
+    inc stats_frames
+    inc frame_index
+    ; title twice a second
+    mov rax, rbx
+    sub rax, stats_last
+    mov rcx, qpc_frequency
+    shr rcx, 1
+    cmp rax, rcx
+    jb no_title
+        mov stats_last, rbx
+        call update_title
+    no_title:
+    mov eax, opt_frames
+    test eax, eax
+    jz frame
+    cmp frame_index, eax
+    jb frame
+finished:
+    call update_title
+    xor eax, eax
+    jmp done
+failed:
+    mov eax, 1
+done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
 main: proc(argc: i32, argv: **u8) -> i32 = {
     push rbx
     sub rsp, 32
     call parse_options
     test eax, eax
     jz usage
+    call crash_install
     call clock_init
     call exe_dir_init
     invoke(arena_init, arena_perm&, PERM_BYTES)
@@ -129,8 +325,7 @@ main: proc(argc: i32, argv: **u8) -> i32 = {
         call bench_sim
         jmp leave
     not_bench:
-    invoke(print, "interactive mode not built yet\n")
-    mov eax, 1
+    call run_game
     jmp leave
 usage:
     invoke(print, "usage: md_rasm [--entities N] [--seed S] [--frames N] [--hidden] [--novsync] [--diag] [--bench-sim [--ticks T]] [--test]\n")

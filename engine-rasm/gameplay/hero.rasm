@@ -1,0 +1,71 @@
+; gameplay/hero.rasm: the hero's presentation (simulation is in sim_hero)
+
+hero_dir_x: f32 = 0.0
+hero_dir_z: f32 = 1.0
+k_min_aim2: const f32 = 0.01
+
+; Face the aim point; build frame_cb.hero_world: rows right, up, forward, position.
+hero_update_matrix: proc() = {
+    vmovss xmm0, aim_x
+    vsubss xmm0, xmm0, hero_x          ; dx
+    vmovss xmm1, aim_z
+    vsubss xmm1, xmm1, hero_z          ; dz
+    vmulss xmm2, xmm0, xmm0
+    vmulss xmm3, xmm1, xmm1
+    vaddss xmm2, xmm2, xmm3
+    vcomiss xmm2, k_min_aim2
+    jb keep                            ; the cursor is on the hero: keep facing
+    vsqrtss xmm2, xmm2, xmm2
+    vdivss xmm0, xmm0, xmm2
+    vdivss xmm1, xmm1, xmm2
+    vmovss hero_dir_x, xmm0
+    vmovss hero_dir_z, xmm1
+keep:
+    vmovss xmm0, hero_dir_x
+    vmovss xmm1, hero_dir_z
+    lea rax, frame_cb.hero_world
+    vxorps xmm2, xmm2, xmm2
+    vmovups xmmword ptr [rax], xmm2
+    vmovups xmmword ptr [rax + 16], xmm2
+    vmovups xmmword ptr [rax + 32], xmm2
+    vmovups xmmword ptr [rax + 48], xmm2
+    ; right = (dz, 0, -dx)
+    vmovss dword ptr [rax], xmm1
+    vsubss xmm3, xmm2, xmm0
+    vmovss dword ptr [rax + 8], xmm3
+    ; up
+    mov dword ptr [rax + 20], 0x3F800000
+    ; forward = (dx, 0, dz)
+    vmovss dword ptr [rax + 32], xmm0
+    vmovss dword ptr [rax + 40], xmm1
+    ; position
+    vmovss xmm3, hero_x
+    vmovss dword ptr [rax + 48], xmm3
+    vmovss xmm3, hero_z
+    vmovss dword ptr [rax + 56], xmm3
+    mov dword ptr [rax + 60], 0x3F800000
+    ret
+}
+
+; -> eax: the hero input byte from the keyboard (W=1 A=2 S=4 D=8)
+hero_read_keys: proc() -> u32 = {
+    xor eax, eax
+    lea rcx, keys_down
+    cmp byte ptr [rcx + 0x57], 0
+    je no_w
+        or eax, 1
+    no_w:
+    cmp byte ptr [rcx + 0x41], 0
+    je no_a
+        or eax, 2
+    no_a:
+    cmp byte ptr [rcx + 0x53], 0
+    je no_s
+        or eax, 4
+    no_s:
+    cmp byte ptr [rcx + 0x44], 0
+    je no_d
+        or eax, 8
+    no_d:
+    ret
+}

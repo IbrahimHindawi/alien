@@ -1,0 +1,196 @@
+; renderer/camera.rasm: camera, mouse aim and the ground footprint for culling
+;
+; The camera produces, every frame: the view-projection matrix in frame_cb,
+; the eye position, the ground point under the mouse (aim_x, aim_z), and four
+; half-planes bounding the part of the ground plane the camera can see
+; (cull_planes). All gameplay is on the XZ plane, so culling is 2D.
+
+; top-down: the eye sits above and behind the hero
+#define CAM_FAR_GROUND 420.0
+
+cam_zoom: f32 = 1.0
+cam_height: const f32 = 38.0
+cam_back: const f32 = 24.0
+cam_ahead: const f32 = 3.0
+cam_tan: const f32 = 0.46630766        ; tan(25 deg): vertical fov 50 deg
+cam_f: const f32 = 2.1445069           ; 1 / tan(25 deg)
+cam_near: const f32 = 1.0
+cam_far: f32 = 1500.0
+cam_far_ground: const f32 = CAM_FAR_GROUND
+cam_aspect: f32 = 1.7777778
+k_zoom_min: const f32 = 0.35
+k_zoom_max: const f32 = 3.5
+k_zoom_step: const f32 = 0.0008333333  ; per WHEEL_DELTA unit: 10% per notch
+k_neg_eps: const f32 = -0.001
+k_half: const f32 = 0.5
+k_cam_one: const f32 = 1.0
+k_cam_two: const f32 = 2.0
+k_sign: [4]const u32[align(16)] = { 0x80000000, 0x80000000, 0x80000000, 0x80000000 }
+
+cam_eye: [4]f32[align(16)] = { 0.0, 38.0, -24.0, 0.0 }
+cam_target: [4]f32[align(16)] = { 0.0, 0.0, 0.0, 0.0 }
+cam_up: [4]const f32[align(16)] = { 0.0, 1.0, 0.0, 0.0 }
+cam_view: [28]f32[align(16)] = {}        ; view matrix, then basis x, y, z
+cam_proj: [16]f32[align(16)] = {}
+cam_view_proj: [16]f32[align(16)] = {}
+
+; ground footprint corners (x, z) and the planes (a, b, c, unused): inside when a*x + b*z + c >= -margin
+cam_corners: [8]f32[align(16)] = {}
+cull_planes: [16]f32[align(16)] = {}
+cam_focus_x: f32 = 0.0
+cam_focus_z: f32 = 0.0
+aim_x: f32 = 0.0
+aim_z: f32 = 1.0
+
+; corner NDCs in footprint order: near left, near right, far right, far left (CCW seen from above)
+cam_corner_ndc: [8]const f32 = { -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0 }
+
+; xmm0: ndc x, xmm1: ndc y -> xmm0: ground x, xmm1: ground z, where the ray
+; through that point of the screen meets y = 0 (or CAM_FAR_GROUND along it).
+camera_ray_ground: proc() = {
+    ; dir = z + x * (ndcx * tan * aspect) + y * (ndcy * tan)
+    vmulss xmm0, xmm0, cam_tan
+    vmulss xmm0, xmm0, cam_aspect
+    vmulss xmm1, xmm1, cam_tan
+    vbroadcastss xmm0, xmm0
+    vbroadcastss xmm1, xmm1
+    lea rax, cam_view
+    vmulps xmm0, xmm0, xmmword ptr [rax + 64]
+    vmulps xmm1, xmm1, xmmword ptr [rax + 80]
+    vaddps xmm0, xmm0, xmm1
+    vaddps xmm0, xmm0, xmmword ptr [rax + 96]      ; dir
+    vmovshdup xmm1, xmm0                            ; dir.y in lane 0
+    vmovss xmm2, cam_far_ground
+    vcomiss xmm1, k_neg_eps
+    jae far                                          ; looking at or above the horizon
+    vmovss xmm3, cam_eye[1]
+    vxorps xmm3, xmm3, xmmword ptr k_sign           ; -eye.y
+    vdivss xmm3, xmm3, xmm1                         ; t
+    vminss xmm2, xmm2, xmm3
+far:
+    vbroadcastss xmm2, xmm2
+    vmulps xmm0, xmm0, xmm2
+    vaddps xmm0, xmm0, xmmword ptr cam_eye
+    vmovhlps xmm1, xmm0, xmm0                       ; z in lane 0
+    ret
+}
+
+; One frame of camera: zoom from the wheel, follow the hero, matrices, aim, footprint.
+camera_update: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 56                        ; 8 + 16 + 56 = 80
+    ; zoom: each wheel notch scales by 10%
+    mov eax, mouse_wheel
+    neg eax
+    vcvtsi2ss xmm0, xmm0, eax
+    vmulss xmm0, xmm0, k_zoom_step
+    vaddss xmm0, xmm0, k_cam_one
+    vmulss xmm0, xmm0, cam_zoom
+    vmaxss xmm0, xmm0, k_zoom_min
+    vminss xmm0, xmm0, k_zoom_max
+    vmovss cam_zoom, xmm0
+    ; eye and target
+    vmovss xmm1, hero_x
+    vmovss xmm2, hero_z
+    vmovss cam_target[0], xmm1
+    vmovss cam_eye[0], xmm1
+    vmovss xmm3, cam_ahead
+    vaddss xmm3, xmm3, xmm2
+    vmovss cam_target[2], xmm3
+    vmulss xmm3, xmm0, cam_height
+    vmovss cam_eye[1], xmm3
+    vmulss xmm3, xmm0, cam_back
+    vsubss xmm3, xmm2, xmm3
+    vmovss cam_eye[2], xmm3
+    vmovss cam_focus_x, xmm1
+    vmovss xmm3, cam_target[2]
+    vmovss cam_focus_z, xmm3
+    ; matrices
+    invoke(look_at_lh, cam_view&, cam_eye&, cam_target&, cam_up&)
+    mov eax, client_width
+    vcvtsi2ss xmm2, xmm2, eax
+    mov eax, client_height
+    vcvtsi2ss xmm3, xmm3, eax
+    vdivss xmm2, xmm2, xmm3
+    vmovss cam_aspect, xmm2
+    vmovss xmm1, cam_f
+    vmovss xmm3, cam_near
+    vmovss xmm0, cam_far
+    vmovss dword ptr [rsp + 32], xmm0
+    mov rcx, cam_proj&
+    call perspective_lh
+    invoke(m4_mul, cam_view_proj&, cam_view&, cam_proj&)
+    ; aim: the ground under the mouse
+    mov eax, mouse_x
+    vcvtsi2ss xmm0, xmm0, eax
+    mov eax, client_width
+    vcvtsi2ss xmm1, xmm1, eax
+    vdivss xmm0, xmm0, xmm1
+    vmulss xmm0, xmm0, k_cam_two
+    vsubss xmm0, xmm0, k_cam_one                   ; 2 * mx / w - 1
+    mov eax, mouse_y
+    vcvtsi2ss xmm1, xmm1, eax
+    mov eax, client_height
+    vcvtsi2ss xmm2, xmm2, eax
+    vdivss xmm1, xmm1, xmm2
+    vmulss xmm1, xmm1, k_cam_two
+    vmovss xmm2, k_cam_one
+    vsubss xmm1, xmm2, xmm1                        ; 1 - 2 * my / h
+    call camera_ray_ground
+    vmovss aim_x, xmm0
+    vmovss aim_z, xmm1
+    ; footprint corners
+    lea rsi, cam_corner_ndc
+    lea rbx, cam_corners
+    mov ecx, 4
+corner:
+    mov dword ptr [rsp + 48], ecx
+    vmovss xmm0, dword ptr [rsi]
+    vmovss xmm1, dword ptr [rsi + 4]
+    call camera_ray_ground
+    vmovss dword ptr [rbx], xmm0
+    vmovss dword ptr [rbx + 4], xmm1
+    add rsi, 8
+    add rbx, 8
+    mov ecx, dword ptr [rsp + 48]
+    dec ecx
+    jnz corner
+    ; planes: for edge p_i -> p_j, n = (-(pj.z - pi.z), pj.x - pi.x) normalised,
+    ; c = -(n . p_i): inside (to the left of a CCW edge) is positive.
+    lea rsi, cam_corners
+    lea rbx, cull_planes
+    xor ecx, ecx
+plane:
+    lea edx, [rcx + 1]
+    and edx, 3
+    vmovss xmm0, dword ptr [rsi + rcx*8]           ; pi.x
+    vmovss xmm1, dword ptr [rsi + rcx*8 + 4]       ; pi.z
+    vmovss xmm2, dword ptr [rsi + rdx*8]           ; pj.x
+    vmovss xmm3, dword ptr [rsi + rdx*8 + 4]       ; pj.z
+    vsubss xmm4, xmm3, xmm1                        ; ez
+    vsubss xmm5, xmm2, xmm0                        ; ex = b
+    vxorps xmm4, xmm4, xmmword ptr k_sign          ; a = -ez
+    vmulss xmm2, xmm4, xmm4
+    vmulss xmm3, xmm5, xmm5
+    vaddss xmm2, xmm2, xmm3
+    vsqrtss xmm2, xmm2, xmm2
+    vdivss xmm4, xmm4, xmm2
+    vdivss xmm5, xmm5, xmm2
+    vmulss xmm0, xmm0, xmm4
+    vmulss xmm1, xmm1, xmm5
+    vaddss xmm0, xmm0, xmm1
+    vxorps xmm0, xmm0, xmmword ptr k_sign          ; c
+    mov eax, ecx
+    shl eax, 4
+    vmovss dword ptr [rbx + rax], xmm4
+    vmovss dword ptr [rbx + rax + 4], xmm5
+    vmovss dword ptr [rbx + rax + 8], xmm0
+    inc ecx
+    cmp ecx, 4
+    jb plane
+    add rsp, 56
+    pop rsi
+    pop rbx
+    ret
+}
