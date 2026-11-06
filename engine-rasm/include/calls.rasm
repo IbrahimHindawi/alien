@@ -1,0 +1,298 @@
+; calls.rasm: the Win64 calling convention, as plain macros
+;
+; rasm does not know the calling convention. These macros are the whole of it,
+; and every line they produce is a line written here. Two names, one
+; definition per argument count; rasm picks the definition whose parameter
+; count matches the invocation. No loops, no conditionals.
+;
+;   invoke(f, a1, ..., an)       n >= 1 (no arguments is just `call f`); f: a proc, an import, or a u64 function pointer in .data
+;   vcall(obj, method, a1, ...)  obj: a COM pointer; method: Vtbl.Method, an offset
+;
+; What the caller owns, exactly as with vulkasm's invoke:
+;
+;   - rsp is 16-aligned and has 32 bytes of shadow space, plus 8 per argument
+;     past the fourth, reserved by the caller's own `sub rsp`.
+;   - Arguments are moved in order: stack arguments first, through r11, then
+;     rcx, rdx, r8, r9. So r11 is not an argument to a call with more than
+;     four, and a register is not an argument after the register it would be
+;     moved into (invoke(f, rdx, rcx) reads rcx after writing it).
+;     r11 and not rax, so that rax, which holds every return value, can be
+;     passed anywhere: invoke(WriteFile, h, buf, rax, written&, 0) is fine.
+;   - vcall loads the vtable through r10.
+;   - An address is `x&` (a 64-bit constant: mov r, offset x). A string
+;     literal is the address of a pooled string. A value is moved as 64 bits;
+;     keep anything passed by value in a 64-bit register or global.
+;   - Floats go in xmm0..xmm3 and are not handled here: write the movss.
+
+; invoke ---------------------------------------------------------------------
+
+invoke: macro(f, a1) = {
+    mov rcx, a1
+    call f
+}
+
+invoke: macro(f, a1, a2) = {
+    mov rcx, a1
+    mov rdx, a2
+    call f
+}
+
+invoke: macro(f, a1, a2, a3) = {
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4) = {
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6, a7) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov r11, a7
+    mov qword ptr [rsp + 48], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6, a7, a8) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov r11, a7
+    mov qword ptr [rsp + 48], r11
+    mov r11, a8
+    mov qword ptr [rsp + 56], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6, a7, a8, a9) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov r11, a7
+    mov qword ptr [rsp + 48], r11
+    mov r11, a8
+    mov qword ptr [rsp + 56], r11
+    mov r11, a9
+    mov qword ptr [rsp + 64], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov r11, a7
+    mov qword ptr [rsp + 48], r11
+    mov r11, a8
+    mov qword ptr [rsp + 56], r11
+    mov r11, a9
+    mov qword ptr [rsp + 64], r11
+    mov r11, a10
+    mov qword ptr [rsp + 72], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov r11, a7
+    mov qword ptr [rsp + 48], r11
+    mov r11, a8
+    mov qword ptr [rsp + 56], r11
+    mov r11, a9
+    mov qword ptr [rsp + 64], r11
+    mov r11, a10
+    mov qword ptr [rsp + 72], r11
+    mov r11, a11
+    mov qword ptr [rsp + 80], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+invoke: macro(f, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12) = {
+    mov r11, a5
+    mov qword ptr [rsp + 32], r11
+    mov r11, a6
+    mov qword ptr [rsp + 40], r11
+    mov r11, a7
+    mov qword ptr [rsp + 48], r11
+    mov r11, a8
+    mov qword ptr [rsp + 56], r11
+    mov r11, a9
+    mov qword ptr [rsp + 64], r11
+    mov r11, a10
+    mov qword ptr [rsp + 72], r11
+    mov r11, a11
+    mov qword ptr [rsp + 80], r11
+    mov r11, a12
+    mov qword ptr [rsp + 88], r11
+    mov rcx, a1
+    mov rdx, a2
+    mov r8, a3
+    mov r9, a4
+    call f
+}
+
+; vcall ----------------------------------------------------------------------
+;
+; The object is argument 1, rcx. A method's arguments start at rdx.
+
+vcall: macro(obj, method) = {
+    mov rcx, obj
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1) = {
+    mov rcx, obj
+    mov rdx, a1
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2) = {
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2, a3) = {
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r9, a3
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2, a3, a4) = {
+    mov r11, a4
+    mov qword ptr [rsp + 32], r11
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r9, a3
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2, a3, a4, a5) = {
+    mov r11, a4
+    mov qword ptr [rsp + 32], r11
+    mov r11, a5
+    mov qword ptr [rsp + 40], r11
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r9, a3
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2, a3, a4, a5, a6) = {
+    mov r11, a4
+    mov qword ptr [rsp + 32], r11
+    mov r11, a5
+    mov qword ptr [rsp + 40], r11
+    mov r11, a6
+    mov qword ptr [rsp + 48], r11
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r9, a3
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2, a3, a4, a5, a6, a7) = {
+    mov r11, a4
+    mov qword ptr [rsp + 32], r11
+    mov r11, a5
+    mov qword ptr [rsp + 40], r11
+    mov r11, a6
+    mov qword ptr [rsp + 48], r11
+    mov r11, a7
+    mov qword ptr [rsp + 56], r11
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r9, a3
+    mov r10, [rcx]
+    call [r10].method
+}
+
+vcall: macro(obj, method, a1, a2, a3, a4, a5, a6, a7, a8) = {
+    mov r11, a4
+    mov qword ptr [rsp + 32], r11
+    mov r11, a5
+    mov qword ptr [rsp + 40], r11
+    mov r11, a6
+    mov qword ptr [rsp + 48], r11
+    mov r11, a7
+    mov qword ptr [rsp + 56], r11
+    mov r11, a8
+    mov qword ptr [rsp + 64], r11
+    mov rcx, obj
+    mov rdx, a1
+    mov r8, a2
+    mov r9, a3
+    mov r10, [rcx]
+    call [r10].method
+}

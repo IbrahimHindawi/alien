@@ -1,0 +1,231 @@
+; tests/tests.rasm: self tests, run by `md_rasm.exe --test` (and tools/test.py)
+;
+; Each test prints PASS or FAIL with its name; the exit code is the number of
+; failures. Tests that need a reference (the state hash against the Python
+; model of the spec) live in tools/test.py, which drives the executable.
+
+tests_failed: u32 = 0
+test_arena: Arena = {}
+test_hash_a: u64 = 0
+
+; rcx: name, edx: 1 pass / 0 fail
+test_report: proc(name: *const u8, ok: u32) = {
+    sub rsp, 40
+    test edx, edx
+    jz fail
+    mov rdx, rcx
+    invoke(print, "PASS %s\n", rdx)
+    jmp done
+fail:
+    inc tests_failed
+    mov rdx, rcx
+    invoke(print, "FAIL %s\n", rdx)
+done:
+    add rsp, 40
+    ret
+}
+
+; Arena: alignment, order, exhaustion, reset.
+test_arena_basics: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 40
+    xor esi, esi                       ; failures
+    push qword ptr arena_guard         ; the layout checked here is the unguarded one
+    sub rsp, 8
+    mov arena_guard, 0
+    invoke(arena_init, test_arena&, 65536)
+    test eax, eax
+    jz bad
+    invoke(arena_push, test_arena&, 100)
+    mov rbx, rax
+    test rax, 63
+    jnz bad
+    invoke(arena_push, test_arena&, 1)
+    test rax, 63
+    jnz bad
+    lea rcx, [rbx + 128]               ; 100 rounded up to 64 is 128
+    cmp rax, rcx
+    jne bad
+    invoke(arena_push, test_arena&, 1048576)
+    test rax, rax
+    jnz bad                            ; too big: must fail
+    mov rax, test_arena.used
+    cmp rax, 129
+    jne bad
+    invoke(arena_reset, test_arena&)
+    invoke(arena_push, test_arena&, 8)
+    cmp rax, rbx
+    jne bad
+    jmp report
+bad:
+    inc esi
+report:
+    xor edx, edx
+    test esi, esi
+    sete dl
+    invoke(test_report, "arena basics", rdx)
+    mov rcx, test_arena.base
+    invoke(VirtualFree, rcx, 0, MEM_RELEASE)
+    add rsp, 8
+    pop rax
+    mov arena_guard, eax
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
+}
+
+; pcg32: the first outputs for seed 1, from the reference implementation.
+test_pcg32: proc() = {
+    push rbx
+    sub rsp, 32
+    xor ebx, ebx
+    mov ecx, 1
+    call pcg32_seed
+    call pcg32_next
+    cmp eax, 0xc9828f91
+    jne bad
+    call pcg32_next
+    cmp eax, 0x1592e274
+    jne bad
+    call pcg32_next
+    cmp eax, 0xc0262657
+    jne bad
+    jmp report
+bad:
+    inc ebx
+report:
+    xor edx, edx
+    test ebx, ebx
+    sete dl
+    invoke(test_report, "pcg32 sequence", rdx)
+    add rsp, 32
+    pop rbx
+    ret
+}
+
+; Grid: after sim_grid on 20000 entities, every sorted slot belongs to the
+; cell its entity is in, cells are contiguous and in ascending entity order.
+test_grid: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    sub rsp, 40
+    mov ecx, 20000
+    mov edx, 3
+    call sim_init
+    ; crowd a quarter of them into a few cells, so cells hold many entities
+    mov rax, sim_pos_x
+    mov rdx, sim_pos_z
+    xor ecx, ecx
+crowd:
+    mov r8d, ecx
+    and r8d, 7
+    vcvtsi2ss xmm0, xmm0, r8d
+    vmovss dword ptr [rax + rcx*4], xmm0
+    vmovss dword ptr [rdx + rcx*4], xmm0
+    add ecx, 4
+    cmp ecx, 20000
+    jb crowd
+    call sim_grid
+    xor ebx, ebx                       ; failures
+    mov r12, sim_cell_start
+    mov rsi, sim_sorted_id
+    mov rdi, sim_cell
+    ; total
+    mov eax, GRID_CELLS
+    cmp dword ptr [r12 + rax*4], 20000
+    jne bad
+    cmp dword ptr [r12], 0
+    jne bad
+    ; walk every cell: ranges monotonic, members in the cell, ids ascending
+    xor ecx, ecx                       ; c
+cell:
+    mov r8d, dword ptr [r12 + rcx*4]
+    mov r9d, dword ptr [r12 + rcx*4 + 4]
+    cmp r8d, r9d
+    ja bad
+    mov r10d, -1                       ; previous id
+member:
+    cmp r8d, r9d
+    jae next_cell
+    mov eax, dword ptr [rsi + r8*4]    ; id
+    cmp dword ptr [rdi + rax*4], ecx
+    jne bad
+    cmp r10d, -1
+    je first
+    cmp eax, r10d
+    jbe bad
+    first:
+    mov r10d, eax
+    inc r8d
+    jmp member
+next_cell:
+    inc ecx
+    cmp ecx, GRID_CELLS
+    jb cell
+    jmp report
+bad:
+    inc ebx
+report:
+    xor edx, edx
+    test ebx, ebx
+    sete dl
+    invoke(test_report, "grid counting sort", rdx)
+    add rsp, 40
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; Determinism: the same scenario twice gives the same hash.
+test_determinism: proc() = {
+    push rbx
+    sub rsp, 32
+    mov ecx, 5000
+    mov edx, 9
+    call sim_init
+    mov ebx, 40
+a:
+    call bench_input
+    mov ecx, eax
+    call sim_step
+    dec ebx
+    jnz a
+    call sim_hash
+    mov test_hash_a, rax
+    mov ecx, 5000
+    mov edx, 9
+    call sim_init
+    mov ebx, 40
+b:
+    call bench_input
+    mov ecx, eax
+    call sim_step
+    dec ebx
+    jnz b
+    call sim_hash
+    xor edx, edx
+    cmp rax, test_hash_a
+    sete dl
+    invoke(test_report, "determinism (same scenario, same hash)", rdx)
+    add rsp, 32
+    pop rbx
+    ret
+}
+
+; -> eax: number of failures
+run_tests: proc() -> i32 = {
+    sub rsp, 40
+    call test_arena_basics
+    call test_pcg32
+    call test_grid
+    call test_determinism
+    mov eax, tests_failed
+    add rsp, 40
+    ret
+}

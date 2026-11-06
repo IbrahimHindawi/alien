@@ -1,0 +1,38 @@
+; print: formatted text to the console and the debugger
+;
+; wsprintfA does the formatting (%d %u %x %s %c, no %f), WriteFile puts it on
+; stdout, OutputDebugStringA in Visual Studio's Output window. A string
+; literal's \n is already a newline: the assembler reads C escapes.
+;
+;     invoke(print, "Failed to create the window\n")
+;     invoke(print, "ERROR::SHADER::COMPILATION_FAILED\n%s\n", rax)
+
+import "calls.rasm"
+
+print_buffer: [1024]u8 = {}
+print_written: u32 = 0
+
+; rcx: format, rdx, r8, r9: up to three values for it
+print: proc(format: *const c8, a1: u64, a2: u64, a3: u64) = {
+    push rbx
+    sub rsp, 48                            ; 32 shadow + 1 stack argument; entry 8 + push 8 + 48 lands on 16
+
+    ; wsprintfA(buffer, format, a1, a2, a3): every argument moves up one
+    ; register. Moved from the last to the first, so nothing is read after it
+    ; has been overwritten; invoke would move rcx first and lose the format.
+    mov [rsp + 32], r9                     ; a3, the fifth argument
+    mov r9, r8                             ; a2
+    mov r8, rdx                            ; a1
+    mov rdx, rcx                           ; format
+    mov rcx, print_buffer&
+    call wsprintfA
+    mov rbx, rax                           ; the length
+
+    invoke(GetStdHandle, STD_OUTPUT_HANDLE)
+    invoke(WriteFile, rax, print_buffer&, rbx, print_written&, 0)
+    invoke(OutputDebugStringA, print_buffer&)
+
+    add rsp, 48
+    pop rbx
+    ret
+}

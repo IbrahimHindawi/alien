@@ -1,0 +1,8 @@
+build/
+*.pdb
+*.exe
+*.obj
+*.ilk
+__pycache__/
+tools/asset-pipeline/cache/
+benchmarks/results/raw/

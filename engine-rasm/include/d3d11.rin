@@ -1,0 +1,14 @@
+// Win32 and D3D11 for rasm programs.
+//
+// The C headers the data file includes, and rinbind's declarations of
+// everything in them (gen/win32_d3d11.rin, made by gen/gen_bindings.py). A rin
+// file, so rin's syntax: `;` ends a declaration here.
+cinclude "windows.h"
+cinclude "d3d11.h"
+cinclude "dxgi.h"
+cinclude "d3dcompiler.h"
+import "gen/win32_d3d11.rin"
+
+// Data the headers declare `extern` and dxguid.lib defines. A global with no
+// initialiser is one C already has.
+IID_ID3D11Texture2D: IID;

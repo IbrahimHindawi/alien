@@ -1,0 +1,592 @@
+; platform/platform.rasm: Win32 window, input, clock, files, command line
+;
+; Everything the rest of the engine knows about Windows above D3D11 is here.
+; State lives in globals; the window procedure only records events, and the
+; frame reads them.
+
+#define IDC_ARROW 32512
+#define WINDOW_STYLE (WS_OVERLAPPEDWINDOW)
+#define MK_LBUTTON_BIT 1
+
+; options ----------------------------------------------------------------
+opt_entities: u32 = 100000
+opt_seed: u32 = 1
+opt_frames: u32 = 0                    ; 0: run until closed
+opt_hidden: u32 = 0
+opt_bench_sim: u32 = 0                 ; --bench-sim: headless, no window
+opt_bench_ticks: u32 = 600
+opt_vsync: u32 = 1
+opt_capture: *u8 = 0                   ; --capture path.bmp: last frame to a file
+opt_width: u32 = 1600
+opt_height: u32 = 900
+opt_test: u32 = 0                      ; --test: run the self tests and exit
+
+; window -----------------------------------------------------------------
+wc: WNDCLASSA = {
+    .style = CS_HREDRAW | CS_VREDRAW,
+    .lpfnWndProc = window_proc&,
+    .lpszClassName = "MillionDead",
+}
+window_rect: RECT = {}
+window: HWND = {}
+msg: MSG = {}
+running: u32 = 1
+client_width: u32 = 1600
+client_height: u32 = 900
+resize_pending: u32 = 0
+window_active: u32 = 1
+
+; input ------------------------------------------------------------------
+keys_down: [256]u8 = {}
+keys_pressed: [256]u8 = {}             ; went down since the last frame_input_end
+mouse_x: i32 = 0
+mouse_y: i32 = 0
+mouse_buttons: u32 = 0                 ; bit 0 left, bit 1 right
+mouse_wheel: i32 = 0                   ; accumulated WHEEL_DELTA units since the last frame
+
+; clock ------------------------------------------------------------------
+qpc_frequency: u64 = 0
+qpc_start: u64 = 0
+qpc_now: u64 = 0
+
+; files ------------------------------------------------------------------
+file_size: i64 = 0
+file_read_bytes: u32 = 0
+exe_dir: [1024]u8 = {}
+exe_dir_len: u32 = 0
+path_buffer: [1024]u8 = {}
+
+; window procedure: records events. rcx hwnd, edx msg, r8 wparam, r9 lparam.
+window_proc: proc(hwnd: HWND, umsg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT = {
+    cmp edx, WM_KEYDOWN
+    je key_down
+    cmp edx, WM_SYSKEYDOWN
+    je key_down
+    cmp edx, WM_KEYUP
+    je key_up
+    cmp edx, WM_SYSKEYUP
+    je key_up
+    cmp edx, WM_MOUSEMOVE
+    je mouse_move
+    cmp edx, WM_LBUTTONDOWN
+    je lbutton_down
+    cmp edx, WM_LBUTTONUP
+    je lbutton_up
+    cmp edx, WM_RBUTTONDOWN
+    je rbutton_down
+    cmp edx, WM_RBUTTONUP
+    je rbutton_up
+    cmp edx, WM_MOUSEWHEEL
+    je wheel
+    cmp edx, WM_SIZE
+    je size
+    cmp edx, WM_ACTIVATEAPP
+    je activate
+    cmp edx, WM_DESTROY
+    je destroy
+    jmp DefWindowProcA
+
+key_down:
+    cmp r8, 256
+    jae handled
+    lea rax, keys_down
+    cmp byte ptr [rax + r8], 0
+    jne handled                        ; auto-repeat
+    mov byte ptr [rax + r8], 1
+    lea rax, keys_pressed
+    mov byte ptr [rax + r8], 1
+    cmp edx, WM_SYSKEYDOWN
+    je pass_on                         ; let Alt+F4 through
+    jmp handled
+key_up:
+    cmp r8, 256
+    jae handled
+    lea rax, keys_down
+    mov byte ptr [rax + r8], 0
+    cmp edx, WM_SYSKEYUP
+    je pass_on
+    jmp handled
+mouse_move:
+    movsx eax, r9w
+    mov mouse_x, eax
+    mov rax, r9
+    shr rax, 16
+    movsx eax, ax
+    mov mouse_y, eax
+    jmp handled
+lbutton_down:
+    or mouse_buttons, 1
+    jmp capture_on
+lbutton_up:
+    and mouse_buttons, -2
+    jmp capture_off
+rbutton_down:
+    or mouse_buttons, 2
+    jmp capture_on
+rbutton_up:
+    and mouse_buttons, -3
+    jmp capture_off
+capture_on:
+    sub rsp, 40
+    call SetCapture
+    add rsp, 40
+    jmp handled
+capture_off:
+    cmp mouse_buttons, 0
+    jne handled
+    sub rsp, 40
+    call ReleaseCapture
+    add rsp, 40
+    jmp handled
+wheel:
+    mov rax, r8
+    shr rax, 16
+    movsx eax, ax
+    add mouse_wheel, eax
+    jmp handled
+size:
+    cmp r8, SIZE_MINIMIZED
+    je handled
+    movzx eax, r9w
+    mov rdx, r9
+    shr rdx, 16
+    movzx edx, dx
+    test eax, eax
+    jz handled
+    test edx, edx
+    jz handled
+    mov client_width, eax
+    mov client_height, edx
+    mov resize_pending, 1
+    jmp handled
+activate:
+    mov window_active, r8d
+    test r8d, r8d
+    jnz pass_on
+    ; Focus lost: forget held keys and buttons so nothing sticks.
+    push rdi
+    lea rdi, keys_down
+    xor eax, eax
+    mov ecx, 256
+    rep stosb
+    pop rdi
+    mov mouse_buttons, 0
+    jmp handled
+destroy:
+    mov running, 0
+    sub rsp, 40
+    invoke(PostQuitMessage, 0)
+    add rsp, 40
+handled:
+    xor eax, eax
+    ret
+pass_on:
+    jmp DefWindowProcA
+}
+
+; Clear the per-frame input edges.
+frame_input_end: proc() = {
+    push rdi
+    lea rdi, keys_pressed
+    xor eax, eax
+    mov ecx, 256
+    rep stosb
+    mov mouse_wheel, 0
+    pop rdi
+    ret
+}
+
+; -> eax: 1 while running. Drains the message queue.
+pump_messages: proc() -> b32 = {
+    sub rsp, 56
+again:
+    invoke(PeekMessageA, msg&, 0, 0, 0, PM_REMOVE)
+    test eax, eax
+    jz drained
+    cmp msg.message, WM_QUIT
+    jne not_quit
+        mov running, 0
+    not_quit:
+    invoke(TranslateMessage, msg&)
+    invoke(DispatchMessageA, msg&)
+    jmp again
+drained:
+    mov eax, running
+    add rsp, 56
+    ret
+}
+
+; Create the window at opt_width x opt_height client pixels. -> eax: 1 ok
+window_create: proc() -> b32 = {
+    push rbx
+    push rsi
+    sub rsp, 104                       ; 12 arguments: 32 + 64, 8 + 16 + 104 = 128
+    call SetProcessDPIAware
+    invoke(GetModuleHandleA, 0)
+    mov wc.hInstance, rax
+    invoke(LoadCursorA, 0, IDC_ARROW)
+    mov wc.hCursor, rax
+    invoke(RegisterClassA, wc&)
+    mov eax, opt_width
+    mov window_rect.right, eax
+    mov eax, opt_height
+    mov window_rect.bottom, eax
+    mov window_rect.left, 0
+    mov window_rect.top, 0
+    invoke(AdjustWindowRect, window_rect&, WINDOW_STYLE, 0)
+    mov ebx, window_rect.right
+    sub ebx, window_rect.left
+    mov esi, window_rect.bottom
+    sub esi, window_rect.top
+    mov eax, WINDOW_STYLE | WS_VISIBLE
+    cmp opt_hidden, 0
+    je visible
+        mov eax, WINDOW_STYLE
+    visible:
+    invoke(CreateWindowExA, 0, "MillionDead", "MILLION DEAD", rax, CW_USEDEFAULT, CW_USEDEFAULT, rbx, rsi, 0, 0, wc.hInstance, 0)
+    test rax, rax
+    jz failed
+    mov window, rax
+    mov eax, opt_width
+    mov client_width, eax
+    mov eax, opt_height
+    mov client_height, eax
+    mov eax, 1
+    jmp done
+failed:
+    xor eax, eax
+done:
+    add rsp, 104
+    pop rsi
+    pop rbx
+    ret
+}
+
+; clock --------------------------------------------------------------------
+
+clock_init: proc() = {
+    sub rsp, 40
+    invoke(QueryPerformanceFrequency, qpc_frequency&)
+    invoke(QueryPerformanceCounter, qpc_start&)
+    add rsp, 40
+    ret
+}
+
+; -> rax: QPC ticks now
+clock_ticks: proc() -> u64 = {
+    sub rsp, 40
+    invoke(QueryPerformanceCounter, qpc_now&)
+    mov rax, qpc_now
+    add rsp, 40
+    ret
+}
+
+; rcx: a QPC tick difference -> rax: microseconds
+ticks_to_us: proc(ticks: u64) -> u64 = {
+    mov rax, rcx
+    mov rcx, 1000000
+    mul rcx
+    div qpc_frequency
+    ret
+}
+
+; files --------------------------------------------------------------------
+
+; Fill exe_dir with the executable's directory, with a trailing backslash.
+exe_dir_init: proc() = {
+    sub rsp, 40
+    invoke(GetModuleFileNameA, 0, exe_dir&, 1000)
+    lea rcx, exe_dir
+scan:
+    dec eax
+    js none
+    cmp byte ptr [rcx + rax], 92
+    jne scan
+    inc eax
+    mov byte ptr [rcx + rax], 0
+    mov exe_dir_len, eax
+    jmp done
+none:
+    mov exe_dir_len, 0
+    mov byte ptr [rcx], 0
+done:
+    add rsp, 40
+    ret
+}
+
+; rcx: path relative to the exe directory -> rax: path_buffer holding the full path
+exe_path: proc(relative: *const u8) -> *u8 = {
+    push rsi
+    push rdi
+    lea rdi, path_buffer
+    lea rsi, exe_dir
+    mov edx, exe_dir_len
+copy_dir:
+    test edx, edx
+    jz copy_rel
+    mov al, [rsi]
+    mov [rdi], al
+    inc rsi
+    inc rdi
+    dec edx
+    jmp copy_dir
+copy_rel:
+    lea r8, path_buffer
+    add r8, 1020
+again:
+    mov al, [rcx]
+    mov [rdi], al
+    test al, al
+    jz done
+    inc rcx
+    inc rdi
+    cmp rdi, r8
+    jb again
+    mov byte ptr [rdi], 0
+done:
+    lea rax, path_buffer
+    pop rdi
+    pop rsi
+    ret
+}
+
+; rcx: path, rdx: arena, r8: *u64 receiving the size -> rax: the file's bytes in
+; the arena (64-byte aligned, one zero byte after the end), or 0.
+read_file: proc(path: *const u8, a: *Arena, size: *u64) -> *u8 = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    sub rsp, 56                        ; 8 + 32 + 56 = 96
+    mov rdi, r8
+    mov qword ptr [rdi], 0
+    mov r12, rdx
+    xor esi, esi
+    invoke(CreateFileA, rcx, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)
+    cmp rax, -1
+    je failed
+    mov rbx, rax
+    invoke(GetFileSizeEx, rbx, file_size&)
+    test eax, eax
+    jz close_failed
+    mov rax, file_size
+    test rax, rax
+    jle close_failed
+    cmp rax, 268435456
+    ja close_failed
+    lea rdx, [rax + 1]
+    invoke(arena_push, r12, rdx)
+    test rax, rax
+    jz close_failed
+    mov rsi, rax
+    invoke(ReadFile, rbx, rsi, file_size, file_read_bytes&, 0)
+    test eax, eax
+    jz close_failed
+    mov eax, file_read_bytes
+    cmp rax, file_size
+    jne close_failed
+    mov [rdi], rax
+    mov byte ptr [rsi + rax], 0
+    invoke(CloseHandle, rbx)
+    mov rax, rsi
+    jmp done
+close_failed:
+    invoke(CloseHandle, rbx)
+failed:
+    xor eax, eax
+done:
+    add rsp, 56
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; command line ---------------------------------------------------------------
+
+; rcx: a NUL-terminated string, rdx: another -> eax: 1 when equal
+string_equal: proc(a: *const u8, b: *const u8) -> b32 = {
+again:
+    mov al, [rcx]
+    cmp al, [rdx]
+    jne different
+    inc rcx
+    inc rdx
+    test al, al
+    jnz again
+    mov eax, 1
+    ret
+different:
+    xor eax, eax
+    ret
+}
+
+; rcx: decimal digits -> eax: the value (u32), edx: 1 when the whole string was digits
+parse_u32: proc(s: *const u8) -> u32 = {
+    xor eax, eax
+    xor edx, edx
+    movzx r8d, byte ptr [rcx]
+    test r8d, r8d
+    jz bad
+again:
+    movzx r8d, byte ptr [rcx]
+    test r8d, r8d
+    jz good
+    sub r8d, 48
+    cmp r8d, 9
+    ja bad
+    imul eax, eax, 10
+    add eax, r8d
+    inc rcx
+    jmp again
+good:
+    mov edx, 1
+bad:
+    ret
+}
+
+; ecx: argc, rdx: argv -> eax: 1 when every option was understood
+parse_options: proc(argc: i32, argv: **u8) -> b32 = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    mov ebx, ecx
+    mov rsi, rdx
+    mov edi, 1
+next:
+    cmp edi, ebx
+    jae success
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--entities")
+    test eax, eax
+    jz not_entities
+        call next_number
+        test edx, edx
+        jz failure
+        cmp eax, MAX_ENTITIES
+        ja failure
+        mov opt_entities, eax
+        jmp advance
+    not_entities:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--seed")
+    test eax, eax
+    jz not_seed
+        call next_number
+        test edx, edx
+        jz failure
+        mov opt_seed, eax
+        jmp advance
+    not_seed:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--frames")
+    test eax, eax
+    jz not_frames
+        call next_number
+        test edx, edx
+        jz failure
+        mov opt_frames, eax
+        jmp advance
+    not_frames:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--ticks")
+    test eax, eax
+    jz not_ticks
+        call next_number
+        test edx, edx
+        jz failure
+        mov opt_bench_ticks, eax
+        jmp advance
+    not_ticks:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--spawn-half")
+    test eax, eax
+    jz not_spawn_half
+        call next_number
+        test edx, edx
+        jz failure
+        vcvtsi2ss xmm0, xmm0, eax
+        vmovss k_spawn_half, xmm0
+        jmp advance
+    not_spawn_half:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--bench-sim")
+    test eax, eax
+    jz not_bench
+        mov opt_bench_sim, 1
+        jmp advance
+    not_bench:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--hidden")
+    test eax, eax
+    jz not_hidden
+        mov opt_hidden, 1
+        jmp advance
+    not_hidden:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--novsync")
+    test eax, eax
+    jz not_novsync
+        mov opt_vsync, 0
+        jmp advance
+    not_novsync:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--diag")
+    test eax, eax
+    jz not_diag
+        mov arena_guard, 1
+        jmp advance
+    not_diag:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--test")
+    test eax, eax
+    jz not_test
+        mov opt_test, 1
+        jmp advance
+    not_test:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--capture")
+    test eax, eax
+    jz not_capture
+        inc edi
+        cmp edi, ebx
+        jae failure
+        mov rax, [rsi + rdi*8]
+        mov opt_capture, rax
+        jmp advance
+    not_capture:
+    mov rcx, [rsi + rdi*8]
+    invoke(print, "unknown option: %s\n", rcx)
+    jmp failure
+advance:
+    inc edi
+    jmp next
+success:
+    mov eax, 1
+    jmp done
+failure:
+    xor eax, eax
+done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+
+; The value after an option: edi advanced to it. -> eax value, edx 1 ok.
+; A local routine sharing parse_options' frame; called with the return
+; address on the stack, so its own pushes do not matter.
+next_number:
+    inc edi
+    xor edx, edx
+    cmp edi, ebx
+    jae no_number
+    sub rsp, 8
+    mov rcx, [rsi + rdi*8]
+    call parse_u32
+    add rsp, 8
+no_number:
+    ret
+}

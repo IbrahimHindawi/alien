@@ -1,0 +1,145 @@
+; MILLION DEAD, the RASM engine
+;
+;   md_rasm.exe [--entities N] [--seed S] [--frames N] [--hidden] [--novsync] [--diag] [--capture f.bmp]
+;   md_rasm.exe --bench-sim [--entities N] [--ticks T] [--seed S]     headless simulation benchmark
+;   md_rasm.exe --test                                                 self tests
+;
+; One program, imported module by module (rasm is a unity build). The order
+; of the imports is the order of the layers: platform, memory, simulation,
+; renderer, game.
+import "include/d3d11.rin"
+import "include/calls.rasm"
+import "include/print.rasm"
+import "memory/arena.rasm"
+import "platform/platform.rasm"
+import "simulation/sim.rasm"
+import "tests/tests.rasm"
+
+; 768 MiB reserved and committed for the run
+#define PERM_BYTES 805306368
+
+bench_t0: u64 = 0
+bench_t1: u64 = 0
+bench_cyc_grid: u64 = 0
+bench_cyc_sep: u64 = 0
+bench_cyc_int: u64 = 0
+bench_ticks_done: u32 = 0
+
+; Headless: init, run opt_bench_ticks ticks with the bench input, print the
+; time per tick, cycles per entity per phase, and the state hash.
+bench_sim: proc() -> i32 = {
+    push rbx
+    push rsi
+    sub rsp, 40
+    mov ecx, opt_entities
+    mov edx, opt_seed
+    call sim_init
+    mov bench_cyc_grid, 0
+    mov bench_cyc_sep, 0
+    mov bench_cyc_int, 0
+    call clock_ticks
+    mov bench_t0, rax
+    mov ebx, opt_bench_ticks
+again:
+    test ebx, ebx
+    jz finished
+    call bench_input
+    mov ecx, eax
+    call sim_step
+    mov rax, cyc_grid
+    add bench_cyc_grid, rax
+    mov rax, cyc_separate
+    add bench_cyc_sep, rax
+    mov rax, cyc_integrate
+    add bench_cyc_int, rax
+    dec ebx
+    jmp again
+finished:
+    call clock_ticks
+    mov bench_t1, rax
+    sub rax, bench_t0
+    invoke(ticks_to_us, rax)
+    xor edx, edx
+    mov ecx, opt_bench_ticks
+    test ecx, ecx
+    jz no_ticks
+    div rcx                            ; microseconds per tick
+    no_ticks:
+    mov ebx, opt_entities
+    mov esi, opt_bench_ticks
+    invoke(print, "bench-sim entities=%u ticks=%u us_per_tick=%u\n", rbx, rsi, rax)
+    ; cycles per entity per tick, x100 (two decimals)
+    mov esi, opt_bench_ticks
+    mov eax, opt_entities
+    imul rsi, rax                      ; entity-ticks
+    test rsi, rsi
+    jz no_entities
+    mov rax, bench_cyc_grid
+    imul rax, rax, 100
+    xor edx, edx
+    div rsi
+    mov rbx, rax
+    mov rax, bench_cyc_sep
+    imul rax, rax, 100
+    xor edx, edx
+    div rsi
+    mov r8, rax
+    mov rax, bench_cyc_int
+    imul rax, rax, 100
+    xor edx, edx
+    div rsi
+    invoke(print, "cycles/entity x100: grid=%u separate=%u integrate=%u\n", rbx, r8, rax)
+    no_entities:
+    call sim_hash
+    mov rsi, rax
+    shr rsi, 32
+    mov ebx, eax
+    invoke(print, "hash=%08x%08x\n", rsi, rbx)
+    xor eax, eax
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
+}
+
+main: proc(argc: i32, argv: **u8) -> i32 = {
+    push rbx
+    sub rsp, 32
+    call parse_options
+    test eax, eax
+    jz usage
+    call clock_init
+    call exe_dir_init
+    invoke(arena_init, arena_perm&, PERM_BYTES)
+    test eax, eax
+    jz no_memory
+    invoke(arena_init, arena_frame&, 67108864)
+    test eax, eax
+    jz no_memory
+    call sim_alloc
+    test eax, eax
+    jz no_memory
+    cmp opt_test, 0
+    je not_test
+        call run_tests
+        jmp leave
+    not_test:
+    cmp opt_bench_sim, 0
+    je not_bench
+        call bench_sim
+        jmp leave
+    not_bench:
+    invoke(print, "interactive mode not built yet\n")
+    mov eax, 1
+    jmp leave
+usage:
+    invoke(print, "usage: md_rasm [--entities N] [--seed S] [--frames N] [--hidden] [--novsync] [--diag] [--bench-sim [--ticks T]] [--test]\n")
+    mov eax, 2
+    jmp leave
+no_memory:
+    invoke(print, "out of memory\n")
+    mov eax, 3
+leave:
+    mov ebx, eax
+    invoke(ExitProcess, rbx)
+}

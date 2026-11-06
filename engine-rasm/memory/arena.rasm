@@ -1,0 +1,145 @@
+; memory/arena.rasm: explicit arenas, one per lifetime
+;
+; An arena is one VirtualAlloc reservation, committed up front, handed out by
+; a bump pointer in 64-byte aligned pieces. Nothing is freed singly; a reset
+; gives everything back at once. The engine has two: `arena_perm` for the
+; whole run (entity arrays, GPU staging) and `arena_frame`, reset every frame.
+;
+; Diagnostic mode (`--diag`, sets arena_guard): every allocation is placed so
+; that it ENDS exactly at a page boundary followed by a PAGE_NOACCESS guard
+; page, so the first byte written past any array faults at once.
+
+Arena: struct = {
+    base: *u8
+    used: u64
+    cap: u64
+    peak: u64
+}
+
+arena_perm: Arena = {}
+arena_frame: Arena = {}
+arena_guard: u32 = 0
+arena_old_protect: u32 = 0
+
+#define PAGE_BYTES 4096
+
+; rcx: arena, rdx: bytes to reserve and commit -> eax: 1 on success
+arena_init: proc(a: *Arena, bytes: u64) -> b32 = {
+    push rbx
+    push rsi
+    sub rsp, 40                        ; 8 + 16 + 40 = 64
+    mov rbx, rcx
+    mov rsi, rdx
+    add rsi, PAGE_BYTES - 1
+    and rsi, -PAGE_BYTES
+    invoke(VirtualAlloc, 0, rsi, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)
+    test rax, rax
+    jz failed
+    mov [rbx].Arena.base, rax
+    mov [rbx].Arena.cap, rsi
+    mov [rbx].Arena.used, 0
+    mov [rbx].Arena.peak, 0
+    mov eax, 1
+    jmp done
+failed:
+    xor eax, eax
+done:
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
+}
+
+; rcx: arena, rdx: size in bytes -> rax: 64-byte aligned memory, or 0 when full.
+; The memory is not cleared: the arena was zero when committed, but a reset
+; arena hands back old contents. Callers that need zero clear it themselves.
+arena_push: proc(a: *Arena, size: u64) -> *u8 = {
+    cmp arena_guard, 0
+    jne guarded
+    mov rax, [rcx].Arena.used
+    add rax, 63
+    and rax, -64
+    lea r8, [rax + rdx]
+    cmp r8, [rcx].Arena.cap
+    ja full
+    mov [rcx].Arena.used, r8
+    cmp r8, [rcx].Arena.peak
+    jbe no_peak
+        mov [rcx].Arena.peak, r8
+    no_peak:
+    add rax, [rcx].Arena.base
+    ret
+full:
+    xor eax, eax
+    ret
+
+guarded:
+    ; end = align_up(used + size, page); start = (end - size) & ~63, so the
+    ; allocation's last byte is the last byte before the guard page.
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    mov rbx, rcx
+    mov r8, [rbx].Arena.used
+    add r8, rdx
+    add r8, 63
+    add r8, PAGE_BYTES - 1
+    and r8, -PAGE_BYTES                ; end, page aligned
+    lea r9, [r8 + PAGE_BYTES]          ; past the guard page
+    cmp r9, [rbx].Arena.cap
+    ja guarded_full
+    mov rsi, r8
+    sub rsi, rdx
+    and rsi, -64                       ; start offset
+    mov [rbx].Arena.used, r9
+    cmp r9, [rbx].Arena.peak
+    jbe guarded_no_peak
+        mov [rbx].Arena.peak, r9
+    guarded_no_peak:
+    mov rdi, [rbx].Arena.base
+    lea rcx, [rdi + r8]
+    invoke(VirtualProtect, rcx, PAGE_BYTES, PAGE_NOACCESS, arena_old_protect&)
+    lea rax, [rdi + rsi]
+    jmp guarded_done
+guarded_full:
+    xor eax, eax
+guarded_done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; rcx: arena. Everything allocated from it is gone. Guard pages are restored
+; to read-write so the space can be reused.
+arena_reset: proc(a: *Arena) = {
+    push rbx
+    sub rsp, 32
+    mov rbx, rcx
+    cmp arena_guard, 0
+    je plain
+    mov rcx, [rbx].Arena.base
+    invoke(VirtualProtect, rcx, [rbx].Arena.cap, PAGE_READWRITE, arena_old_protect&)
+plain:
+    mov [rbx].Arena.used, 0
+    add rsp, 32
+    pop rbx
+    ret
+}
+
+; rcx: destination, rdx: bytes (a multiple of 32; dest 32-byte aligned). Zeroes with AVX stores.
+zero_memory: proc(dst: *u8, bytes: u64) = {
+    vpxor ymm0, ymm0, ymm0
+    shr rdx, 5
+    jz done
+again:
+    vmovdqa ymmword ptr [rcx], ymm0
+    add rcx, 32
+    dec rdx
+    jnz again
+done:
+    vzeroupper
+    ret
+}
