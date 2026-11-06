@@ -90,6 +90,12 @@ instance_desc: D3D11_BUFFER_DESC = {
     .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
     .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
 }
+bolt_desc: D3D11_BUFFER_DESC = {
+    .ByteWidth = PROJ_MAX * INSTANCE_BYTES,
+    .Usage = D3D11_USAGE.D3D11_USAGE_DYNAMIC,
+    .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
+    .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
+}
 mesh_buffer_desc: D3D11_BUFFER_DESC = { .Usage = D3D11_USAGE.D3D11_USAGE_IMMUTABLE }
 mesh_init: D3D11_SUBRESOURCE_DATA = {}
 
@@ -124,6 +130,9 @@ instance_buffers: [3]*ID3D11Buffer = {}
 instance_counts: [3]u32 = {}
 lod_meshes: [3]Mesh = {}
 hero_mesh: Mesh = {}
+bolt_mesh: Mesh = {}
+bolt_buffer: *ID3D11Buffer = {}
+bolt_count: u32 = 0
 new_object: *void = {}
 mapped: D3D11_MAPPED_SUBRESOURCE = {}
 viewport: D3D11_VIEWPORT = { .MaxDepth = 1.0 }
@@ -378,6 +387,12 @@ instance:
     invoke(mesh_load, "assets\\meshes\\hero.lod0.mdm", hero_mesh&)
     test eax, eax
     jz failed
+    invoke(mesh_load, "assets\\fixtures\\bolt.mdm", bolt_mesh&)
+    test eax, eax
+    jz failed
+    vcall(device, ID3D11DeviceVtbl.CreateBuffer, bolt_desc&, 0, bolt_buffer&)
+    test eax, eax
+    js failed
     invoke(arena_reset, arena_frame&)
     mov eax, 1
     jmp done
@@ -712,12 +727,17 @@ next_lod:
     cmp ebx, LOD_COUNT
     jb lod
 
+    ; projectiles: the unit pipeline with the bolt mesh
+    call render_bolts
     ; hero
+    cmp hero_alive, 0
+    je no_hero
     vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_hero, 0, 0)
     vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, hero_mesh.vb&, mesh_stride&, mesh_offset&)
     vcall(context, ID3D11DeviceContextVtbl.IASetIndexBuffer, hero_mesh.ib, DXGI_FORMAT.DXGI_FORMAT_R32_UINT, 0)
     mov eax, hero_mesh.index_count
     vcall(context, ID3D11DeviceContextVtbl.DrawIndexed, rax, 0, 0)
+    no_hero:
 
     cmp opt_capture, 0
     je no_capture
@@ -731,6 +751,47 @@ next_lod:
     vcall(swap_chain, IDXGISwapChainVtbl.Present, rax, 0)
     add rsp, 72
     pop rsi
+    pop rbx
+    ret
+}
+
+; Upload the projectiles as instances and draw them with the bolt mesh.
+render_bolts: proc() = {
+    push rbx
+    sub rsp, 64                        ; 8 + 8 + 64 = 80
+    mov ebx, proj_count
+    mov bolt_count, ebx
+    test ebx, ebx
+    jz done
+    vcall(context, ID3D11DeviceContextVtbl.Map, bolt_buffer, 0, D3D11_MAP.D3D11_MAP_WRITE_DISCARD, 0, mapped&)
+    test eax, eax
+    js done
+    mov rdx, mapped.pData
+    xor ecx, ecx
+    lea r8, proj_x
+    lea r9, proj_z
+    lea r10, proj_vx
+    lea r11, proj_vz
+fill:
+    vmovss xmm0, dword ptr [r8 + rcx*4]
+    vinsertps xmm0, xmm0, dword ptr [r9 + rcx*4], 0x10
+    vinsertps xmm0, xmm0, dword ptr [r10 + rcx*4], 0x20
+    vinsertps xmm0, xmm0, dword ptr [r11 + rcx*4], 0x30
+    vmovups xmmword ptr [rdx], xmm0
+    add rdx, 16
+    inc ecx
+    cmp ecx, ebx
+    jb fill
+    vcall(context, ID3D11DeviceContextVtbl.Unmap, bolt_buffer, 0)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_unit, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, bolt_mesh.vb&, mesh_stride&, mesh_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 1, 1, bolt_buffer&, instance_stride&, instance_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetIndexBuffer, bolt_mesh.ib, DXGI_FORMAT.DXGI_FORMAT_R32_UINT, 0)
+    mov eax, bolt_mesh.index_count
+    mov r8d, ebx
+    vcall(context, ID3D11DeviceContextVtbl.DrawIndexedInstanced, rax, r8, 0, 0, 0)
+done:
+    add rsp, 64
     pop rbx
     ret
 }

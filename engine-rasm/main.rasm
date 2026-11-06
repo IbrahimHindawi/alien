@@ -15,6 +15,8 @@ import "platform/platform.rasm"
 import "platform/crash.rasm"
 import "simulation/sim.rasm"
 import "simulation/separate_v2.rasm"
+import "simulation/combat.rasm"
+import "simulation/dump.rasm"
 import "renderer/math.rasm"
 import "renderer/camera.rasm"
 import "renderer/render.rasm"
@@ -29,10 +31,12 @@ bench_t1: u64 = 0
 bench_cyc_grid: u64 = 0
 bench_cyc_sep: u64 = 0
 bench_cyc_int: u64 = 0
+bench_cyc_combat: u64 = 0
 bench_ticks_done: u32 = 0
 
 ; interactive loop
 frame_index: u32 = 0
+run_escalation: u32 = 1
 loop_last: u64 = 0
 tick_accum: u64 = 0                    ; QPC ticks not yet simulated
 tick_qpc: u64 = 0                      ; QPC ticks per simulation tick
@@ -45,6 +49,11 @@ title_buffer: [256]u8 = {}
 k_tick_seconds: const f32 = 0.016666668
 
 #define MAX_TICKS_PER_FRAME 4
+; the run's escalation (scenario, not simulation rules): start with
+; RUN_START aliens in a ring, then the population target grows by
+; RUN_GROWTH per second up to --entities
+#define RUN_START 300
+#define RUN_GROWTH 40
 
 ; Headless: init, run opt_bench_ticks ticks with the bench input, print the
 ; time per tick, cycles per entity per phase, and the state hash.
@@ -58,6 +67,7 @@ bench_sim: proc() -> i32 = {
     mov bench_cyc_grid, 0
     mov bench_cyc_sep, 0
     mov bench_cyc_int, 0
+    mov bench_cyc_combat, 0
     call clock_ticks
     mov bench_t0, rax
     mov ebx, opt_bench_ticks
@@ -73,6 +83,8 @@ again:
     add bench_cyc_sep, rax
     mov rax, cyc_integrate
     add bench_cyc_int, rax
+    mov rax, cyc_combat
+    add bench_cyc_combat, rax
     dec ebx
     jmp again
 finished:
@@ -110,7 +122,22 @@ finished:
     xor edx, edx
     div rsi
     invoke(print, "cycles/entity x100: grid=%u separate=%u integrate=%u\n", rbx, r8, rax)
+    mov rax, bench_cyc_combat
+    xor edx, edx
+    mov ecx, opt_bench_ticks
+    div rcx
+    mov ebx, kills
+    mov esi, proj_count
+    invoke(print, "combat cycles/tick=%u kills=%u projectiles=%u\n", rax, rbx, rsi)
+    mov eax, sim_count
+    mov ebx, hero_alive
+    invoke(print, "count=%u hero_alive=%u\n", rax, rbx)
     no_entities:
+    mov rcx, opt_dump
+    test rcx, rcx
+    jz no_dump
+        call sim_dump
+    no_dump:
     call sim_hash
     mov rsi, rax
     shr rsi, 32
@@ -153,6 +180,10 @@ update_title: proc() = {
     add eax, instance_counts[1]
     add eax, instance_counts[2]
     mov r13, rax                       ; visible
+    mov eax, kills
+    mov r12, rax                       ; kills replace the instance cycles in the title
+    vcvttss2si eax, hero_hp
+    mov rdi, rax                       ; hp replaces the sim time
     mov eax, sim_count
     mov qword ptr [rsp + 32], rax
     mov qword ptr [rsp + 40], rsi
@@ -188,7 +219,35 @@ done:
     pop rbx
     ret
 }
-title_fmt: [96]const u8 = "MILLION DEAD [RASM]  entities %u  frame %u us  sim %u us  instances %u kcyc  visible %u"
+title_fmt: [112]const u8 = "MILLION DEAD [RASM]  aliens %u  frame %u us  HP %u  kills %u  visible %u   (WASD move, mouse aim, R restart)"
+
+; A fresh run: RUN_START aliens spawned on the ring, target escalating.
+run_start: proc() = {
+    sub rsp, 40
+    xor ecx, ecx
+    mov edx, opt_seed
+    call sim_init
+    mov eax, RUN_START
+    cmp eax, opt_entities
+    cmova eax, opt_entities
+    mov target_count, eax
+    add rsp, 40
+    ret
+}
+
+; Per tick, before sim_step: target = min(--entities, RUN_START + tick * RUN_GROWTH / 60)
+run_escalate: proc() = {
+    mov eax, sim_tick
+    imul eax, eax, RUN_GROWTH
+    xor edx, edx
+    mov ecx, 60
+    div ecx
+    add eax, RUN_START
+    cmp eax, opt_entities
+    cmova eax, opt_entities
+    mov target_count, eax
+    ret
+}
 
 ; The game: window, renderer, fixed 60 Hz simulation, render every frame.
 run_game: proc() -> i32 = {
@@ -202,9 +261,17 @@ run_game: proc() -> i32 = {
     call render_init
     test eax, eax
     jz failed
-    mov ecx, opt_entities
-    mov edx, opt_seed
-    call sim_init
+    cmp opt_spawn_set, 0
+    je escalating
+        mov ecx, opt_entities          ; --spawn-half: a stress scene, all at once
+        mov edx, opt_seed
+        call sim_init
+        mov run_escalation, 0
+        jmp started
+    escalating:
+        call run_start
+        mov run_escalation, 1
+    started:
     mov rax, qpc_frequency
     xor edx, edx
     mov ecx, 60
@@ -222,6 +289,15 @@ frame:
     je no_escape
         invoke(DestroyWindow, window)
     no_escape:
+    ; R after death: a fresh run
+    cmp hero_alive, 0
+    jne no_restart
+    lea rax, keys_pressed
+    cmp byte ptr [rax + 0x52], 0
+    je no_restart
+        inc opt_seed
+        call run_start
+    no_restart:
     call clock_ticks
     mov rbx, rax
     sub rax, loop_last
@@ -249,8 +325,17 @@ frame:
 simulate:
     test esi, esi
     jz simulated
+    cmp run_escalation, 0
+    je fixed_population
+        call run_escalate
+    fixed_population:
     call hero_read_keys
+    or eax, FIRE_BIT                   ; the primary weapon is automatic
     mov ecx, eax
+    vmovss xmm0, aim_x
+    vmovss sim_aim_x, xmm0
+    vmovss xmm0, aim_z
+    vmovss sim_aim_z, xmm0
     call sim_step
     vmovss xmm0, render_time
     vaddss xmm0, xmm0, k_tick_seconds

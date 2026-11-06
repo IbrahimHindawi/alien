@@ -1,4 +1,4 @@
-; simulation/sim.rasm: the swarm, exactly as shared/specs/sim_spec.md (SIM 3)
+; simulation/sim.rasm: the swarm, exactly as shared/specs/sim_spec.md (SIM 4)
 ;
 ; Structure of arrays, one entity per index, 64-byte aligned columns from the
 ; permanent arena. Every float operation is one of the spec's, in its order:
@@ -46,11 +46,12 @@ cyc_hero: u64 = 0
 cyc_grid: u64 = 0
 cyc_separate: u64 = 0
 cyc_integrate: u64 = 0
+cyc_combat: u64 = 0
 
 ; constants (each a full ymm of one value, for vbroadcast-free loads)
 k_world_half: [8]const f32[align(32)] = { 1024.0, 1024.0, 1024.0, 1024.0, 1024.0, 1024.0, 1024.0, 1024.0 }
 k_inv_cell: [8]const f32[align(32)] = { 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 }
-k_eps: [8]const f32[align(32)] = { 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4 }
+k_stop: [8]const f32[align(32)] = { 0.81, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81 }
 k_one: [8]const f32[align(32)] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 }
 k_speed: [8]const f32[align(32)] = { 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0 }
 k_sep: [8]const f32[align(32)] = { 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0 }
@@ -66,6 +67,7 @@ k_spawn_half: f32 = 1000.0
 
 ; Bench input: the hero walks a square, 2 s per side (W, D, S, A).
 bench_keys: [4]const u8 = { 1, 8, 4, 2 }
+bench_aim: [8]const f32 = { 10.0, 0.0, 0.0, 10.0, -10.0, 0.0, 0.0, -10.0 }
 
 ; allocation ---------------------------------------------------------------
 
@@ -119,6 +121,10 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_sorted_id, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_hp, rax
     mov eax, 1
     jmp done
 failed:
@@ -187,9 +193,17 @@ sim_init: proc(count: u32, seed: u32) = {
     sub rsp, 48                        ; 8 + 24 + 48 = 80; xmm6 at [rsp + 32]
     movaps xmmword ptr [rsp + 32], xmm6
     mov sim_count, ecx
+    mov target_count, ecx
     mov sim_tick, 0
     mov hero_x, 0
     mov hero_z, 0
+    mov hero_hp, 0x42C80000            ; 100.0
+    mov hero_alive, 1
+    mov fire_cooldown, 0
+    mov kills, 0
+    mov spawned, 0
+    mov shots, 0
+    mov proj_count, 0
     mov ebx, ecx
     mov ecx, edx
     call pcg32_seed
@@ -215,6 +229,8 @@ again:
     mov dword ptr [rax + rsi*4], 0
     mov rax, sim_vel_z
     mov dword ptr [rax + rsi*4], 0
+    mov rax, sim_hp
+    mov dword ptr [rax + rsi*4], 0x3F800000
     inc esi
     jmp again
 done:
@@ -230,6 +246,8 @@ done:
 
 ; ecx: keys (W=1 A=2 S=4 D=8)
 sim_hero: proc(keys: u32) = {
+    cmp hero_alive, 0
+    je dead
     ; ix = D - A, iz = W - S, as -1, 0, 1
     xor eax, eax
     xor edx, edx
@@ -262,6 +280,7 @@ sim_hero: proc(keys: u32) = {
     vmaxss xmm1, xmm1, k_lo[0]
     vminss xmm1, xmm1, k_hi[0]
     vmovss hero_z, xmm1
+dead:
     ret
 }
 
@@ -486,7 +505,7 @@ sim_integrate: proc() = {
     movaps xmmword ptr [rsp + 144], xmm15
     vbroadcastss ymm15, hero_x
     vbroadcastss ymm14, hero_z
-    vmovaps ymm13, ymmword ptr k_eps
+    vmovaps ymm13, ymmword ptr k_stop
     vmovaps ymm12, ymmword ptr k_one
     vmovaps ymm11, ymmword ptr k_speed
     vmovaps ymm10, ymmword ptr k_sep
@@ -512,7 +531,7 @@ step:
     vmulps ymm2, ymm0, ymm0
     vmulps ymm3, ymm1, ymm1
     vaddps ymm2, ymm2, ymm3                        ; d2
-    vcmpps ymm3, ymm2, ymm13, 30                   ; d2 > 1e-4 (GT_OQ)
+    vcmpps ymm3, ymm2, ymm13, 30                   ; d2 > STOP_R2 (GT_OQ)
     vblendvps ymm2, ymm12, ymm2, ymm3              ; 1.0 where masked out
     vsqrtps ymm2, ymm2
     vdivps ymm2, ymm12, ymm2                       ; inv = 1 / sqrt(d2)
@@ -520,7 +539,7 @@ step:
     vmulps ymm0, ymm0, ymm11                       ; tx = (dx * inv) * speed
     vmulps ymm1, ymm1, ymm2
     vmulps ymm1, ymm1, ymm11
-    vandps ymm0, ymm0, ymm3                        ; 0 where d2 <= 1e-4
+    vandps ymm0, ymm0, ymm3                        ; 0 where d2 <= STOP_R2
     vandps ymm1, ymm1, ymm3
     vmulps ymm4, ymm10, ymmword ptr [rsi + rax]
     vaddps ymm0, ymm0, ymm4                        ; tx + sep_x * 6
@@ -573,6 +592,7 @@ sim_step: proc(keys: u32) = {
     push rsi
     sub rsp, 40
     mov esi, ecx
+    mov sim_in_keys, ecx
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -606,8 +626,16 @@ sim_step: proc(keys: u32) = {
     rdtsc
     shl rdx, 32
     or rax, rdx
+    mov rcx, rax
+    sub rcx, rbx
+    mov cyc_integrate, rcx
+    mov rbx, rax
+    call sim_combat
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
     sub rax, rbx
-    mov cyc_integrate, rax
+    mov cyc_combat, rax
     inc sim_tick
     add rsp, 40
     pop rsi
@@ -615,8 +643,20 @@ sim_step: proc(keys: u32) = {
     ret
 }
 
-; -> al: the bench input byte for the current tick
-bench_input: proc() -> u8 = {
+; -> eax: the bench input for the current tick (spec 4.7); sets sim_aim_x/z
+bench_input: proc() -> u32 = {
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, 30
+    div ecx
+    and eax, 3
+    lea rcx, bench_aim
+    vmovss xmm0, dword ptr [rcx + rax*8]
+    vaddss xmm0, xmm0, hero_x
+    vmovss sim_aim_x, xmm0
+    vmovss xmm0, dword ptr [rcx + rax*8 + 4]
+    vaddss xmm0, xmm0, hero_z
+    vmovss sim_aim_z, xmm0
     mov eax, sim_tick
     xor edx, edx
     mov ecx, 120
@@ -624,6 +664,7 @@ bench_input: proc() -> u8 = {
     and eax, 3
     lea rcx, bench_keys
     movzx eax, byte ptr [rcx + rax]
+    or eax, FIRE_BIT
     ret
 }
 
@@ -662,6 +703,15 @@ sim_hash: proc() -> u64 = {
     invoke(fnv1a, sim_pos_z, rsi, rax)
     invoke(fnv1a, sim_vel_x, rsi, rax)
     invoke(fnv1a, sim_vel_z, rsi, rax)
+    invoke(fnv1a, sim_hp, rsi, rax)
+    invoke(fnv1a, hero_hp&, 4, rax)
+    invoke(fnv1a, hero_alive&, 4, rax)
+    invoke(fnv1a, kills&, 4, rax)
+    invoke(fnv1a, proj_count&, 4, rax)
+    mov esi, proj_count
+    shl esi, 2
+    invoke(fnv1a, proj_x&, rsi, rax)
+    invoke(fnv1a, proj_z&, rsi, rax)
     add rsp, 40
     pop rsi
     pop rbx

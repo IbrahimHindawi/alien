@@ -1,0 +1,76 @@
+; simulation/dump.rasm: raw state to a file, for diffing against the reference
+;
+; Layout (little-endian): u32 count, u32 tick, u32 proj_count, u32 kills,
+; f32 hero_x, hero_z, hero_hp, u32 hero_alive, u32 shots, u32 fire_cooldown,
+; u32 spawned, u32 0, then pos_x, pos_z, vel_x, vel_z, hp [count] and proj_x,
+; proj_z, proj_vx, proj_vz [proj_count], proj_life, proj_pierce [proj_count].
+
+dump_header: [12]u32 = {}
+dump_file: *void = {}
+dump_written: u32 = 0
+
+; rcx: column, rdx: bytes
+dump_column: proc(data: *u8, bytes: u64) = {
+    sub rsp, 56
+    mov r8, rdx
+    mov rdx, rcx
+    invoke(WriteFile, dump_file, rdx, r8, dump_written&, 0)
+    add rsp, 56
+    ret
+}
+
+; rcx: path
+sim_dump: proc(path: *const u8) = {
+    push rbx
+    push rsi
+    sub rsp, 56                        ; 8 + 16 + 56 = 80
+    invoke(CreateFileA, rcx, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
+    cmp rax, -1
+    je done
+    mov dump_file, rax
+    lea rbx, dump_header
+    mov eax, sim_count
+    mov dword ptr [rbx], eax
+    mov eax, sim_tick
+    mov dword ptr [rbx + 4], eax
+    mov eax, proj_count
+    mov dword ptr [rbx + 8], eax
+    mov eax, kills
+    mov dword ptr [rbx + 12], eax
+    mov eax, dword ptr hero_x
+    mov dword ptr [rbx + 16], eax
+    mov eax, dword ptr hero_z
+    mov dword ptr [rbx + 20], eax
+    mov eax, dword ptr hero_hp
+    mov dword ptr [rbx + 24], eax
+    mov eax, hero_alive
+    mov dword ptr [rbx + 28], eax
+    mov eax, shots
+    mov dword ptr [rbx + 32], eax
+    mov eax, fire_cooldown
+    mov dword ptr [rbx + 36], eax
+    mov eax, spawned
+    mov dword ptr [rbx + 40], eax
+    invoke(dump_column, dump_header&, 48)
+    mov esi, sim_count
+    shl esi, 2
+    invoke(dump_column, sim_pos_x, rsi)
+    invoke(dump_column, sim_pos_z, rsi)
+    invoke(dump_column, sim_vel_x, rsi)
+    invoke(dump_column, sim_vel_z, rsi)
+    invoke(dump_column, sim_hp, rsi)
+    mov esi, proj_count
+    shl esi, 2
+    invoke(dump_column, proj_x&, rsi)
+    invoke(dump_column, proj_z&, rsi)
+    invoke(dump_column, proj_vx&, rsi)
+    invoke(dump_column, proj_vz&, rsi)
+    invoke(dump_column, proj_life&, rsi)
+    invoke(dump_column, proj_pierce&, rsi)
+    invoke(CloseHandle, dump_file)
+done:
+    add rsp, 56
+    pop rsi
+    pop rbx
+    ret
+}

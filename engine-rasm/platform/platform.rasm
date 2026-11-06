@@ -17,9 +17,11 @@ opt_bench_sim: u32 = 0                 ; --bench-sim: headless, no window
 opt_bench_ticks: u32 = 600
 opt_vsync: u32 = 1
 opt_capture: *u8 = 0                   ; --capture path.bmp: last frame to a file
+opt_dump: *u8 = 0                      ; --dump-state path: raw state after a bench run
 opt_width: u32 = 1600
 opt_height: u32 = 900
 opt_test: u32 = 0                      ; --test: run the self tests and exit
+opt_spawn_set: u32 = 0                 ; --spawn-half given: a stress scene instead of a run
 
 ; window -----------------------------------------------------------------
 wc: WNDCLASSA = {
@@ -509,6 +511,7 @@ next:
         jz failure
         vcvtsi2ss xmm0, xmm0, eax
         vmovss k_spawn_half, xmm0
+        mov opt_spawn_set, 1
         jmp advance
     not_spawn_half:
     mov rcx, [rsi + rdi*8]
@@ -546,6 +549,17 @@ next:
         mov opt_test, 1
         jmp advance
     not_test:
+    mov rcx, [rsi + rdi*8]
+    invoke(string_equal, rcx, "--dump-state")
+    test eax, eax
+    jz not_dump
+        inc edi
+        cmp edi, ebx
+        jae failure
+        mov rax, [rsi + rdi*8]
+        mov opt_dump, rax
+        jmp advance
+    not_dump:
     mov rcx, [rsi + rdi*8]
     invoke(string_equal, rcx, "--capture")
     test eax, eax

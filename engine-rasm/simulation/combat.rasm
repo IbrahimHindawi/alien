@@ -1,0 +1,534 @@
+; simulation/combat.rasm: SIM 4 combat (shared/specs/sim_spec.md 4.5)
+;
+; After integration, in order: fire, projectiles, contact, deaths, spawning.
+; Projectiles and contact find candidates through the grid built at the start
+; of the tick (sorted_id, cell_start) and read the entities' current
+; positions, exactly as the spec's order says.
+
+#define PROJ_MAX 4096
+#define PROJ_LIFE 60
+#define PROJ_PIERCE 3
+#define FIRE_INTERVAL 4
+#define FIRE_BIT 16
+#define CONTACT_MAX 20
+#define SPAWN_PER_TICK 64
+
+sim_hp: *f32 = 0
+hero_hp: f32 = 100.0
+hero_alive: u32 = 1
+fire_cooldown: u32 = 0
+kills: u32 = 0
+spawned: u32 = 0
+shots: u32 = 0
+target_count: u32 = 0
+sim_in_keys: u32 = 0
+sim_aim_x: f32 = 0.0
+sim_aim_z: f32 = 1.0
+
+proj_count: u32 = 0
+proj_x: [PROJ_MAX]f32[align(32)] = {}
+proj_z: [PROJ_MAX]f32[align(32)] = {}
+proj_vx: [PROJ_MAX]f32[align(32)] = {}
+proj_vz: [PROJ_MAX]f32[align(32)] = {}
+proj_life: [PROJ_MAX]u32[align(32)] = {}
+proj_pierce: [PROJ_MAX]u32[align(32)] = {}
+
+k_enemy_hp: const f32 = 1.0
+k_hero_hp: const f32 = 100.0
+k_fire_eps: const f32 = 1.0e-4
+k_spread_c: const f32 = 0.99862953
+k_spread_s: const f32 = 0.05233596
+k_muzzle: const f32 = 0.8
+k_proj_speed: const f32 = 60.0
+k_half_dt: const f32 = 0.008333334
+k_proj_r2: const f32 = 0.36
+k_contact_r2: const f32 = 1.21
+k_contact_dps: const f32 = 4.0
+k_world_lo: const f32 = -1024.0
+k_spawn_min: const f32 = 70.0
+k_spawn_span: const f32 = 50.0
+k_l2_min: const f32 = 0.0625
+k_zero: const f32 = 0.0
+
+; fire -----------------------------------------------------------------------
+
+sim_fire: proc() = {
+    cmp hero_alive, 0
+    je cool
+    cmp fire_cooldown, 0
+    jne cool
+    test sim_in_keys, FIRE_BIT
+    jz cool
+    mov ecx, proj_count
+    cmp ecx, PROJ_MAX
+    jae cool
+    vmovss xmm0, sim_aim_x
+    vsubss xmm0, xmm0, hero_x          ; dx
+    vmovss xmm1, sim_aim_z
+    vsubss xmm1, xmm1, hero_z          ; dz
+    vmulss xmm2, xmm0, xmm0
+    vmulss xmm3, xmm1, xmm1
+    vaddss xmm2, xmm2, xmm3            ; d2
+    vcomiss xmm2, k_fire_eps
+    jbe straight
+        vsqrtss xmm2, xmm2, xmm2
+        vmovss xmm3, k_one[0]
+        vdivss xmm3, xmm3, xmm2        ; inv
+        vmulss xmm0, xmm0, xmm3
+        vmulss xmm1, xmm1, xmm3
+        jmp aimed
+    straight:
+        vxorps xmm0, xmm0, xmm0
+        vmovss xmm1, k_one[0]
+    aimed:
+    ; spread: shots % 3
+    mov eax, shots
+    xor edx, edx
+    mov r8d, 3
+    div r8d
+    cmp edx, 1
+    jne not_left
+        vmulss xmm2, xmm0, k_spread_c
+        vmulss xmm3, xmm1, k_spread_s
+        vsubss xmm2, xmm2, xmm3        ; dx*C - dz*S
+        vmulss xmm3, xmm0, k_spread_s
+        vmulss xmm4, xmm1, k_spread_c
+        vaddss xmm1, xmm3, xmm4        ; dx*S + dz*C
+        vmovss xmm0, xmm0, xmm2
+        jmp spread_done
+    not_left:
+    cmp edx, 2
+    jne spread_done
+        vmulss xmm2, xmm0, k_spread_c
+        vmulss xmm3, xmm1, k_spread_s
+        vaddss xmm2, xmm2, xmm3        ; dx*C + dz*S
+        vmulss xmm3, xmm1, k_spread_c
+        vmulss xmm4, xmm0, k_spread_s
+        vsubss xmm1, xmm3, xmm4        ; dz*C - dx*S
+        vmovss xmm0, xmm0, xmm2
+    spread_done:
+    lea rax, proj_x
+    vmulss xmm2, xmm0, k_muzzle
+    vaddss xmm2, xmm2, hero_x
+    vmovss dword ptr [rax + rcx*4], xmm2
+    lea rax, proj_z
+    vmulss xmm2, xmm1, k_muzzle
+    vaddss xmm2, xmm2, hero_z
+    vmovss dword ptr [rax + rcx*4], xmm2
+    lea rax, proj_vx
+    vmulss xmm2, xmm0, k_proj_speed
+    vmovss dword ptr [rax + rcx*4], xmm2
+    lea rax, proj_vz
+    vmulss xmm2, xmm1, k_proj_speed
+    vmovss dword ptr [rax + rcx*4], xmm2
+    lea rax, proj_life
+    mov dword ptr [rax + rcx*4], PROJ_LIFE
+    lea rax, proj_pierce
+    mov dword ptr [rax + rcx*4], PROJ_PIERCE
+    inc proj_count
+    inc shots
+    mov fire_cooldown, FIRE_INTERVAL
+cool:
+    cmp fire_cooldown, 0
+    je done
+    dec fire_cooldown
+done:
+    ret
+}
+
+; projectiles ------------------------------------------------------------------
+
+sim_projectiles: proc() = {
+    push rbp
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 40                        ; 8 + 64 + 40 = 112
+    mov r12, sim_sorted_id
+    mov r13, sim_cell_start
+    mov r14, sim_pos_x
+    mov r15, sim_pos_z
+    mov rsi, sim_hp
+    xor ebx, ebx                       ; p
+projectile:
+    cmp ebx, proj_count
+    jae moved
+    mov dword ptr [rsp + 32], 2        ; half steps left
+half_step:
+    lea rax, proj_x
+    lea rdx, proj_vx
+    vmovss xmm0, dword ptr [rdx + rbx*4]
+    vmulss xmm0, xmm0, k_half_dt
+    vaddss xmm0, xmm0, dword ptr [rax + rbx*4]
+    vmovss dword ptr [rax + rbx*4], xmm0           ; x
+    lea rax, proj_z
+    lea rdx, proj_vz
+    vmovss xmm1, dword ptr [rdx + rbx*4]
+    vmulss xmm1, xmm1, k_half_dt
+    vaddss xmm1, xmm1, dword ptr [rax + rbx*4]
+    vmovss dword ptr [rax + rbx*4], xmm1           ; z
+    lea rax, proj_pierce
+    cmp dword ptr [rax + rbx*4], 0
+    je next_half
+    ; inside the world: -1024 <= x < 1024 (and z)
+    vcomiss xmm0, k_world_lo
+    jb next_half
+    vcomiss xmm0, k_world_half[0]
+    jae next_half
+    vcomiss xmm1, k_world_lo
+    jb next_half
+    vcomiss xmm1, k_world_half[0]
+    jae next_half
+    ; cell
+    vaddss xmm2, xmm0, k_world_half[0]
+    vmulss xmm2, xmm2, k_inv_cell[0]
+    vcvttss2si eax, xmm2                           ; cx
+    vaddss xmm2, xmm1, k_world_half[0]
+    vmulss xmm2, xmm2, k_inv_cell[0]
+    vcvttss2si r10d, xmm2                          ; cz
+    lea ecx, [rax - 1]
+    xor edx, edx
+    test ecx, ecx
+    cmovs ecx, edx
+    mov r11d, ecx                                  ; lo column
+    lea ecx, [rax + 1]
+    mov edx, GRID_DIM - 1
+    cmp ecx, edx
+    cmova ecx, edx
+    mov ebp, ecx                                   ; hi column
+    sub r10d, 1
+    mov r9d, 3
+row:
+    cmp r10d, GRID_DIM
+    jae next_row
+    mov ecx, r10d
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov r8d, dword ptr [r13 + rcx*4]
+    mov ecx, dword ptr [r13 + rdx*4]
+candidate:
+    cmp r8d, ecx
+    jae next_row
+    mov edi, dword ptr [r12 + r8*4]                ; id
+    vmovss xmm4, dword ptr [rsi + rdi*4]
+    vcomiss xmm4, k_zero
+    jbe skip                                       ; already dead
+    vsubss xmm2, xmm0, dword ptr [r14 + rdi*4]
+    vsubss xmm3, xmm1, dword ptr [r15 + rdi*4]
+    vmulss xmm2, xmm2, xmm2
+    vmulss xmm3, xmm3, xmm3
+    vaddss xmm2, xmm2, xmm3
+    vcomiss xmm2, k_proj_r2
+    jae skip
+    vsubss xmm4, xmm4, k_one[0]                    ; hp - damage
+    vmovss dword ptr [rsi + rdi*4], xmm4
+    lea rax, proj_pierce
+    dec dword ptr [rax + rbx*4]
+    jz next_half                                   ; pierce spent
+skip:
+    inc r8d
+    jmp candidate
+next_row:
+    inc r10d
+    dec r9d
+    jnz row
+next_half:
+    dec dword ptr [rsp + 32]
+    jnz half_step
+    lea rax, proj_life
+    dec dword ptr [rax + rbx*4]
+    inc ebx
+    jmp projectile
+moved:
+    ; stable compaction: keep life > 0 and pierce > 0
+    xor ecx, ecx                       ; read
+    xor edx, edx                       ; write
+    mov r8d, proj_count
+compact:
+    cmp ecx, r8d
+    jae compacted
+    lea rax, proj_life
+    cmp dword ptr [rax + rcx*4], 0
+    je drop
+    lea rax, proj_pierce
+    cmp dword ptr [rax + rcx*4], 0
+    je drop
+    lea rax, proj_x
+    mov r9d, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rdx*4], r9d
+    lea rax, proj_z
+    mov r9d, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rdx*4], r9d
+    lea rax, proj_vx
+    mov r9d, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rdx*4], r9d
+    lea rax, proj_vz
+    mov r9d, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rdx*4], r9d
+    lea rax, proj_life
+    mov r9d, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rdx*4], r9d
+    lea rax, proj_pierce
+    mov r9d, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rdx*4], r9d
+    inc edx
+drop:
+    inc ecx
+    jmp compact
+compacted:
+    mov proj_count, edx
+    add rsp, 40
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    pop rbp
+    ret
+}
+
+; contact ------------------------------------------------------------------------
+
+sim_contact: proc() = {
+    push rbp
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 40
+    cmp hero_alive, 0
+    je done
+    mov r12, sim_sorted_id
+    mov r13, sim_cell_start
+    mov r14, sim_pos_x
+    mov r15, sim_pos_z
+    mov rsi, sim_hp
+    xor ebx, ebx                       ; touching
+    vmovss xmm0, hero_x
+    vmovss xmm1, hero_z
+    vaddss xmm2, xmm0, k_world_half[0]
+    vmulss xmm2, xmm2, k_inv_cell[0]
+    vcvttss2si eax, xmm2
+    vaddss xmm2, xmm1, k_world_half[0]
+    vmulss xmm2, xmm2, k_inv_cell[0]
+    vcvttss2si r10d, xmm2
+    lea ecx, [rax - 1]
+    xor edx, edx
+    test ecx, ecx
+    cmovs ecx, edx
+    mov r11d, ecx
+    lea ecx, [rax + 1]
+    mov edx, GRID_DIM - 1
+    cmp ecx, edx
+    cmova ecx, edx
+    mov ebp, ecx
+    sub r10d, 1
+    mov r9d, 3
+row:
+    cmp r10d, GRID_DIM
+    jae next_row
+    mov ecx, r10d
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov r8d, dword ptr [r13 + rcx*4]
+    mov ecx, dword ptr [r13 + rdx*4]
+candidate:
+    cmp r8d, ecx
+    jae next_row
+    mov edi, dword ptr [r12 + r8*4]
+    vmovss xmm4, dword ptr [rsi + rdi*4]
+    vcomiss xmm4, k_zero
+    jbe skip
+    vmovss xmm2, dword ptr [r14 + rdi*4]
+    vsubss xmm2, xmm2, xmm0            ; pos_x - hero_x
+    vmovss xmm3, dword ptr [r15 + rdi*4]
+    vsubss xmm3, xmm3, xmm1
+    vmulss xmm2, xmm2, xmm2
+    vmulss xmm3, xmm3, xmm3
+    vaddss xmm2, xmm2, xmm3
+    vcomiss xmm2, k_contact_r2
+    jae skip
+    inc ebx
+    cmp ebx, CONTACT_MAX
+    je counted
+skip:
+    inc r8d
+    jmp candidate
+next_row:
+    inc r10d
+    dec r9d
+    jnz row
+counted:
+    vcvtsi2ss xmm2, xmm2, ebx
+    vmulss xmm2, xmm2, k_contact_dps
+    vmulss xmm2, xmm2, k_dt[0]
+    vmovss xmm3, hero_hp
+    vsubss xmm3, xmm3, xmm2
+    vmovss hero_hp, xmm3
+    vcomiss xmm3, k_zero
+    ja done
+    mov hero_hp, 0
+    mov hero_alive, 0
+done:
+    add rsp, 40
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    pop rbp
+    ret
+}
+
+; deaths ---------------------------------------------------------------------------
+
+; Stable compaction of every entity with hp > 0.
+sim_compact: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    sub rsp, 40                        ; 8 + 48 + 40 = 96
+    mov r8, sim_pos_x
+    mov r9, sim_pos_z
+    mov r10, sim_vel_x
+    mov r11, sim_vel_z
+    mov r12, sim_hp
+    mov r13d, sim_count
+    xor ecx, ecx                       ; read
+    xor edx, edx                       ; write
+    vxorps xmm1, xmm1, xmm1
+again:
+    cmp ecx, r13d
+    jae done
+    vmovss xmm0, dword ptr [r12 + rcx*4]
+    vcomiss xmm0, xmm1
+    jbe dead
+    cmp ecx, edx
+    je kept                            ; nothing removed yet: no copy
+    vmovss dword ptr [r12 + rdx*4], xmm0
+    mov eax, dword ptr [r8 + rcx*4]
+    mov dword ptr [r8 + rdx*4], eax
+    mov eax, dword ptr [r9 + rcx*4]
+    mov dword ptr [r9 + rdx*4], eax
+    mov eax, dword ptr [r10 + rcx*4]
+    mov dword ptr [r10 + rdx*4], eax
+    mov eax, dword ptr [r11 + rcx*4]
+    mov dword ptr [r11 + rdx*4], eax
+kept:
+    inc edx
+dead:
+    inc ecx
+    jmp again
+done:
+    mov eax, r13d
+    sub eax, edx
+    add kills, eax
+    mov sim_count, edx
+    add rsp, 40
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; spawning ---------------------------------------------------------------------------
+
+sim_spawn: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 72                        ; 8 + 16 + 72 = 96; xmm6, xmm7 at [rsp + 32], [rsp + 48]
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    mov eax, target_count
+    sub eax, sim_count
+    jbe done                           ; count >= target
+    mov ebx, SPAWN_PER_TICK
+    cmp eax, ebx
+    cmovb ebx, eax
+one:
+    test ebx, ebx
+    jz done
+retry:
+    call rand_unit
+    vmulss xmm0, xmm0, k_two
+    vsubss xmm6, xmm0, k_one[0]        ; a
+    call rand_unit
+    vmulss xmm0, xmm0, k_two
+    vsubss xmm7, xmm0, k_one[0]        ; b
+    vmulss xmm0, xmm6, xmm6
+    vmulss xmm1, xmm7, xmm7
+    vaddss xmm0, xmm0, xmm1            ; l2
+    vcomiss xmm0, k_one[0]
+    ja retry
+    vcomiss xmm0, k_l2_min
+    jb retry
+    vsqrtss xmm0, xmm0, xmm0
+    vmovss xmm1, k_one[0]
+    vdivss xmm1, xmm1, xmm0            ; inv
+    vmulss xmm6, xmm6, xmm1            ; a * inv
+    vmulss xmm7, xmm7, xmm1
+    call rand_unit
+    vmulss xmm0, xmm0, k_spawn_span
+    vaddss xmm0, xmm0, k_spawn_min     ; r = MIN + u * SPAN  (addition commutes exactly)
+    vmulss xmm6, xmm6, xmm0
+    vaddss xmm6, xmm6, hero_x
+    vmaxss xmm6, xmm6, k_lo[0]
+    vminss xmm6, xmm6, k_hi[0]
+    vmulss xmm7, xmm7, xmm0
+    vaddss xmm7, xmm7, hero_z
+    vmaxss xmm7, xmm7, k_lo[0]
+    vminss xmm7, xmm7, k_hi[0]
+    mov ecx, sim_count
+    mov rax, sim_pos_x
+    vmovss dword ptr [rax + rcx*4], xmm6
+    mov rax, sim_pos_z
+    vmovss dword ptr [rax + rcx*4], xmm7
+    mov rax, sim_vel_x
+    mov dword ptr [rax + rcx*4], 0
+    mov rax, sim_vel_z
+    mov dword ptr [rax + rcx*4], 0
+    mov rax, sim_hp
+    mov dword ptr [rax + rcx*4], 0x3F800000
+    inc sim_count
+    inc spawned
+    dec ebx
+    jmp one
+done:
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    add rsp, 72
+    pop rsi
+    pop rbx
+    ret
+}
+
+; one combat step, after integration
+sim_combat: proc() = {
+    sub rsp, 40
+    call sim_fire
+    call sim_projectiles
+    call sim_contact
+    call sim_compact
+    call sim_spawn
+    add rsp, 40
+    ret
+}

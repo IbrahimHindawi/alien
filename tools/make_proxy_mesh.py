@@ -79,3 +79,20 @@ def write(path, verts):
 
 if __name__ == '__main__':
     write(ROOT / 'shared/fixtures/proxy.mdm', build())
+
+
+def build_bolt():
+    """A projectile: an elongated cyan diamond, fully emissive, 8 triangles."""
+    v = []
+    glow = (0x3F, 0xE6, 0xFF, 255)
+    tip, tail = (0.0, 1.0, 0.45), (0.0, 1.0, -0.45)
+    ring = [(0.07, 1.0, 0.0), (0.0, 1.07, 0.0), (-0.07, 1.0, 0.0), (0.0, 0.93, 0.0)]
+    for k in range(4):
+        a, b = ring[k], ring[(k + 1) % 4]
+        tri(v, tip, b, a, glow)
+        tri(v, tail, a, b, glow)
+    return v
+
+
+if __name__ == '__main__':
+    write(ROOT / 'shared/fixtures/bolt.mdm', build_bolt())

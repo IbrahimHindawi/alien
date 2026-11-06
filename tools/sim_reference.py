@@ -1,4 +1,4 @@
-"""Independent reference model of shared/specs/sim_spec.md (SIM 3).
+"""Independent reference model of shared/specs/sim_spec.md (SIM 4).
 
 Pure Python, written from the spec, not from the assembly. Every f32
 operation is computed in double precision and rounded to f32: for + - * / and
@@ -29,7 +29,18 @@ SEP_STRENGTH, STEER, SPEED, HERO_SPEED = 6.0, 0.125, 7.0, 9.0
 DIAG = f32(0.70710677)
 LO, HI = -1023.5, 1023.5
 EPS = f32(1.0e-4)
+STOP_R2 = f32(0.81)
 BENCH_KEYS = [1, 8, 4, 2]
+BENCH_AIM = [(10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0)]
+FIRE = 16
+ENEMY_HP, PROJ_MAX, PROJ_SPEED, PROJ_LIFE, PROJ_PIERCE = 1.0, 4096, 60.0, 60, 3
+PROJ_R2, PROJ_DAMAGE, FIRE_INTERVAL = f32(0.36), 1.0, 4
+SPREAD_C, SPREAD_S = f32(0.99862953), f32(0.05233596)
+HERO_HP, CONTACT_R2, CONTACT_MAX, CONTACT_DPS = 100.0, f32(1.21), 20, 4.0
+SPAWN_PER_TICK, SPAWN_MIN, SPAWN_SPAN = 64, 70.0, 50.0
+HALF_DT = f32(0.008333334)
+UNIT = f32(5.9604645e-08)
+MUZZLE = f32(0.8)
 
 
 class Pcg:
@@ -60,6 +71,7 @@ def clamp(v):
 class Sim:
     def __init__(self, count, seed, spawn_half=1000.0):
         rng = Pcg(seed)
+        self.rng = rng
         self.count, self.tick = count, 0
         self.hx = self.hz = 0.0
         self.px, self.pz = [0.0] * count, [0.0] * count
@@ -69,14 +81,20 @@ class Sim:
             b = mul(float(rng.next() >> 8), f32(5.9604645e-08))
             self.px[i] = mul(sub(mul(a, 2.0), 1.0), spawn_half)
             self.pz[i] = mul(sub(mul(b, 2.0), 1.0), spawn_half)
+        self.hp = [ENEMY_HP] * count
+        self.hero_hp, self.hero_alive, self.cool = HERO_HP, 1, 0
+        self.kills = self.spawned = self.shots = 0
+        self.target = count
+        self.proj = []   # [x, z, vx, vz, life, pierce]
 
-    def step(self, keys):
+    def step(self, keys, aim=(0.0, 1.0)):
         ix = float((1 if keys & 8 else 0) - (1 if keys & 2 else 0))
         iz = float((1 if keys & 1 else 0) - (1 if keys & 4 else 0))
         if ix != 0 and iz != 0:
             ix, iz = mul(ix, DIAG), mul(iz, DIAG)
-        self.hx = clamp(add(self.hx, mul(mul(ix, HERO_SPEED), DT)))
-        self.hz = clamp(add(self.hz, mul(mul(iz, HERO_SPEED), DT)))
+        if self.hero_alive:
+            self.hx = clamp(add(self.hx, mul(mul(ix, HERO_SPEED), DT)))
+            self.hz = clamp(add(self.hz, mul(mul(iz, HERO_SPEED), DT)))
         n = self.count
         # grid
         cells = {}
@@ -120,7 +138,7 @@ class Sim:
         for i in range(n):
             dx, dz = sub(self.hx, self.px[i]), sub(self.hz, self.pz[i])
             d2 = add(mul(dx, dx), mul(dz, dz))
-            if d2 > EPS:
+            if d2 > STOP_R2:
                 inv = div(1.0, f32(math.sqrt(d2)))
                 tx, tz = mul(mul(dx, inv), SPEED), mul(mul(dz, inv), SPEED)
             else:
@@ -132,16 +150,113 @@ class Sim:
             self.px[i] = clamp(add(self.px[i], mul(vx, DT)))
             self.pz[i] = clamp(add(self.pz[i], mul(vz, DT)))
             self.vx[i], self.vz[i] = vx, vz
+        self.combat(keys, aim, cells)
         self.tick += 1
 
+    def candidates(self, x, z, cells):
+        cx = int(mul(add(x, WORLD_HALF), INV_CELL))
+        cz = int(mul(add(z, WORLD_HALF), INV_CELL))
+        for oz in (-1, 0, 1):
+            for ox in (-1, 0, 1):
+                c = (cx + ox, cz + oz)
+                if 0 <= c[0] < GRID_DIM and 0 <= c[1] < GRID_DIM:
+                    yield from cells.get(c, ())
+
+    def combat(self, keys, aim, cells):
+        # fire
+        if self.hero_alive and self.cool == 0 and (keys & FIRE) and len(self.proj) < PROJ_MAX:
+            dx, dz = sub(aim[0], self.hx), sub(aim[1], self.hz)
+            d2 = add(mul(dx, dx), mul(dz, dz))
+            if d2 > EPS:
+                inv = div(1.0, f32(math.sqrt(d2)))
+                dx, dz = mul(dx, inv), mul(dz, inv)
+            else:
+                dx, dz = 0.0, 1.0
+            k = self.shots % 3
+            if k == 1:
+                dx, dz = sub(mul(dx, SPREAD_C), mul(dz, SPREAD_S)), add(mul(dx, SPREAD_S), mul(dz, SPREAD_C))
+            elif k == 2:
+                dx, dz = add(mul(dx, SPREAD_C), mul(dz, SPREAD_S)), sub(mul(dz, SPREAD_C), mul(dx, SPREAD_S))
+            self.proj.append([add(self.hx, mul(dx, MUZZLE)), add(self.hz, mul(dz, MUZZLE)),
+                              mul(dx, PROJ_SPEED), mul(dz, PROJ_SPEED), PROJ_LIFE, PROJ_PIERCE])
+            self.shots += 1
+            self.cool = FIRE_INTERVAL
+        if self.cool > 0:
+            self.cool -= 1
+        # projectiles
+        for p in self.proj:
+            for _ in range(2):
+                p[0] = add(p[0], mul(p[2], HALF_DT))
+                p[1] = add(p[1], mul(p[3], HALF_DT))
+                if p[5] == 0 or not (-WORLD_HALF <= p[0] < WORLD_HALF and -WORLD_HALF <= p[1] < WORLD_HALF):
+                    continue
+                for j in self.candidates(p[0], p[1], cells):
+                    if self.hp[j] > 0.0:
+                        dx, dz = sub(p[0], self.px[j]), sub(p[1], self.pz[j])
+                        if add(mul(dx, dx), mul(dz, dz)) < PROJ_R2:
+                            self.hp[j] = sub(self.hp[j], PROJ_DAMAGE)
+                            p[5] -= 1
+                            if p[5] == 0:
+                                break
+            p[4] -= 1
+        self.proj = [p for p in self.proj if p[4] > 0 and p[5] > 0]
+        # contact
+        if self.hero_alive:
+            n = 0
+            for j in self.candidates(self.hx, self.hz, cells):
+                if self.hp[j] > 0.0:
+                    dx, dz = sub(self.px[j], self.hx), sub(self.pz[j], self.hz)
+                    if add(mul(dx, dx), mul(dz, dz)) < CONTACT_R2:
+                        n += 1
+                        if n == CONTACT_MAX:
+                            break
+            self.hero_hp = sub(self.hero_hp, mul(mul(float(n), CONTACT_DPS), DT))
+            if self.hero_hp <= 0.0:
+                self.hero_hp, self.hero_alive = 0.0, 0
+        # deaths
+        keep = [i for i in range(self.count) if self.hp[i] > 0.0]
+        self.kills += self.count - len(keep)
+        for col in ('px', 'pz', 'vx', 'vz', 'hp'):
+            c = getattr(self, col)
+            setattr(self, col, [c[i] for i in keep])
+        self.count = len(keep)
+        # spawning
+        n = min(SPAWN_PER_TICK, self.target - self.count) if self.count < self.target else 0
+        for _ in range(n):
+            while True:
+                a = sub(mul(mul(float(self.rng.next() >> 8), UNIT), 2.0), 1.0)
+                b = sub(mul(mul(float(self.rng.next() >> 8), UNIT), 2.0), 1.0)
+                l2 = add(mul(a, a), mul(b, b))
+                if not (l2 > 1.0 or l2 < 0.0625):
+                    break
+            inv = div(1.0, f32(math.sqrt(l2)))
+            r = add(SPAWN_MIN, mul(mul(float(self.rng.next() >> 8), UNIT), SPAWN_SPAN))
+            self.px.append(clamp(add(self.hx, mul(mul(a, inv), r))))
+            self.pz.append(clamp(add(self.hz, mul(mul(b, inv), r))))
+            self.vx.append(0.0)
+            self.vz.append(0.0)
+            self.hp.append(ENEMY_HP)
+            self.count += 1
+            self.spawned += 1
+
     def bench_keys(self):
-        return BENCH_KEYS[(self.tick // 120) & 3]
+        return BENCH_KEYS[(self.tick // 120) & 3] | FIRE
+
+    def bench_aim(self):
+        ax, az = BENCH_AIM[(self.tick // 30) & 3]
+        return (add(self.hx, ax), add(self.hz, az))
+
+    def bench_step(self):
+        self.step(self.bench_keys(), self.bench_aim())
 
     def hash(self):
         h = 0xcbf29ce484222325
         data = struct.pack('<IIff', self.count, self.tick, self.hx, self.hz)
-        for col in (self.px, self.pz, self.vx, self.vz):
+        for col in (self.px, self.pz, self.vx, self.vz, self.hp):
             data += struct.pack(f'<{self.count}f', *col)
+        data += struct.pack('<fIII', self.hero_hp, self.hero_alive, self.kills, len(self.proj))
+        data += struct.pack(f'<{len(self.proj)}f', *(p[0] for p in self.proj))
+        data += struct.pack(f'<{len(self.proj)}f', *(p[1] for p in self.proj))
         for b in data:
             h = ((h ^ b) * 0x100000001b3) & M64
         return h
@@ -156,8 +271,8 @@ def main():
     a = ap.parse_args()
     s = Sim(a.entities, a.seed, float(a.spawn_half))
     for _ in range(a.ticks):
-        s.step(s.bench_keys())
-    print(f'hash={s.hash():016x}')
+        s.bench_step()
+    print(f'hash={s.hash():016x} kills={s.kills} hero_hp={s.hero_hp} alive={s.hero_alive} proj={len(s.proj)} count={s.count}')
 
 
 if __name__ == '__main__':

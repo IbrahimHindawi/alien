@@ -21,6 +21,7 @@ SCENARIOS = [  # (entities, ticks, seed, spawn_half): sparse, dense, very dense 
     (1000, 120, 1, 1000),
     (3000, 300, 5, 20),
     (2000, 600, 11, 8),
+    (4000, 400, 7, 150),        # hero survives: live projectiles in the hash
 ]
 QUICK = SCENARIOS[:2]
 
@@ -51,10 +52,10 @@ def main():
     for n, t, seed, half in (QUICK if a.quick else SCENARIOS):
         args = ['--entities', str(n), '--ticks', str(t), '--seed', str(seed), '--spawn-half', str(half)]
         code, out = run(['--bench-sim', *args])
-        got = next((l.split('=', 1)[1] for l in out.splitlines() if l.startswith('hash=')), None)
+        got = next((l.split()[0].split('=', 1)[1] for l in out.splitlines() if l.startswith('hash=')), None)
         s = sim_reference.Sim(n, seed, float(half))
         for _ in range(t):
-            s.step(s.bench_keys())
+            s.bench_step()
         want = f'{s.hash():016x}'
         check(f'reference hash n={n} ticks={t} seed={seed} spawn_half={half}', code == 0 and got == want,
               f'engine {got} reference {want}')

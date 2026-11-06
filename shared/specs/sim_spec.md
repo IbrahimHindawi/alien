@@ -19,7 +19,7 @@ How exactness is achieved:
 - Default MXCSR (round to nearest, no FTZ/DAZ). Both engines must leave it
   alone.
 
-Version: **SIM 3** (milestone 3: swarm with grid separation). Bump the number
+Version: **SIM 4** (milestone 4: combat: hero weapon, damage, death, spawning). Bump the number
 on any rule change; the scenario fixtures record the version they were made
 with.
 
@@ -39,6 +39,7 @@ with.
     SEP_STRENGTH     6.0f
     STEER            0.125f                fraction of the velocity error corrected per tick
     SCUTTLER_SPEED   7.0f                  m/s
+    STOP_R2          0.81f                 enemies stop pursuing inside 0.9 m of the hero (SIM 4; was 1e-4)
     HERO_SPEED       9.0f                  m/s
     DIAG             0.70710677f           0x3F3504F3
     BOUND_LO         -1023.5f
@@ -158,7 +159,7 @@ For each entity `i`, after separation is complete for **all** entities:
     dx = hero_x - pos_x[i]
     dz = hero_z - pos_z[i]
     d2 = dx * dx + dz * dz
-    if d2 > 1.0e-4f:
+    if d2 > STOP_R2:
         inv = 1.0f / sqrt(d2)
         tx = (dx * inv) * SCUTTLER_SPEED
         tz = (dz * inv) * SCUTTLER_SPEED
@@ -176,21 +177,127 @@ For each entity `i`, after separation is complete for **all** entities:
 
 `1.0f / sqrt(d2)` is two correctly rounded operations (sqrtps then divps), not
 an `rsqrt`. The branch may be implemented as a mask: compute with `d2`
-replaced by 1.0f where `d2 <= 1e-4f`, then select zero.
+replaced by 1.0f where `d2 <= STOP_R2`, then select zero.
 
 `min`/`max`: x86 `maxps a, b` returns `b` when either is NaN; no NaN can
 occur here (all inputs finite), so any correct min/max is equivalent.
 
-### 4.5 End of tick
+### 4.5 Combat (SIM 4)
+
+State added: `hp[i]` (f32, per entity, `ENEMY_HP` at spawn), hero `hero_hp`
+(f32), `hero_alive` (u32), `fire_cooldown` (u32), `kills` (u32), `spawned`
+(u32), `target_count` (u32), the RNG (continues from init), and projectiles
+(structure of arrays, at most `PROJ_MAX`, dense, index order is creation
+order): `proj_x, proj_z, proj_vx, proj_vz` (f32), `proj_life, proj_pierce`
+(u32), `proj_count`.
+
+    ENEMY_HP        1.0f
+    PROJ_MAX        4096
+    PROJ_SPEED      60.0f
+    PROJ_LIFE       60          ticks
+    PROJ_PIERCE     3           enemies a projectile can kill
+    PROJ_R2         0.36f       hit radius 0.6 m, squared
+    PROJ_DAMAGE     1.0f
+    FIRE_INTERVAL   4           ticks between shots
+    SPREAD_C        0.99862953f cos 3 deg
+    SPREAD_S        0.05233596f sin 3 deg
+    HERO_HP         100.0f
+    CONTACT_R2      1.21f       1.1 m, squared
+    CONTACT_MAX     20          touching enemies counted, at most
+    CONTACT_DPS     4.0f        hp per second per touching enemy
+    SPAWN_PER_TICK  64
+    SPAWN_MIN       70.0f       spawn ring around the hero
+    SPAWN_SPAN      50.0f
+
+Tick input, besides `keys`: `fire` (bit 16 of keys) and the aim point
+`(aim_x, aim_z)` in world space.
+
+After 4.4, in this order:
+
+**Fire.** If `hero_alive` and `fire_cooldown == 0` and fire is held and
+`proj_count < PROJ_MAX`:
+
+    dx = aim_x - hero_x; dz = aim_z - hero_z; d2 = dx*dx + dz*dz
+    if d2 > 1.0e-4f: inv = 1.0f / sqrt(d2); dx = dx * inv; dz = dz * inv
+    else: dx = 0.0f; dz = 1.0f
+    k = spawned_shots % 3               (a u32 counter of shots fired)
+    k == 1: (dx, dz) = (dx*SPREAD_C - dz*SPREAD_S, dx*SPREAD_S + dz*SPREAD_C)
+    k == 2: (dx, dz) = (dx*SPREAD_C + dz*SPREAD_S, dz*SPREAD_C - dx*SPREAD_S)
+    append: x = hero_x + dx * 0.8f, z = hero_z + dz * 0.8f,
+            vx = dx * PROJ_SPEED, vz = dz * PROJ_SPEED, life = PROJ_LIFE, pierce = PROJ_PIERCE
+    spawned_shots = spawned_shots + 1; fire_cooldown = FIRE_INTERVAL
+    (each expression above in the order written: `dx*SPREAD_C - dz*SPREAD_S` is
+     `(dx*SPREAD_C) - (dz*SPREAD_S)`)
+
+Then, if `fire_cooldown > 0`: `fire_cooldown = fire_cooldown - 1`.
+
+**Projectiles.** For each projectile `p` in index order, two half steps:
+
+    repeat 2:
+        proj_x = proj_x + proj_vx * HALF_DT;  proj_z = proj_z + proj_vz * HALF_DT    (HALF_DT = 0.008333334f)
+        hits: the grid of 4.2 (built from start-of-tick positions) gives
+        candidates from the 3x3 cells around the projectile's cell (cell of the
+        projectile computed as in 4.2; a projectile outside the world is
+        skipped); rows ascending, x ascending, slots ascending; for each
+        candidate id: if hp[id] > 0 and
+            ((proj_x - pos_x[id])^2 + (proj_z - pos_z[id])^2) < PROJ_R2
+        (current positions, after 4.4; dx*dx + dz*dz as in 4.3):
+            hp[id] = hp[id] - PROJ_DAMAGE; proj_pierce = proj_pierce - 1
+            if proj_pierce == 0: stop this projectile's hits
+    proj_life = proj_life - 1
+
+Projectiles with `life == 0` or `pierce == 0` are then removed, keeping the
+order of the rest (stable compaction).
+
+**Contact.** If `hero_alive`: count enemies with `hp > 0` and
+`(pos - hero)^2 < CONTACT_R2` (dx = pos_x - hero_x etc.) among the 3x3 cells
+around the hero's cell, in the grid's order, stopping at CONTACT_MAX;
+`hero_hp = hero_hp - (f32(count) * CONTACT_DPS) * DT`; if `hero_hp <= 0.0f`:
+`hero_hp = 0.0f; hero_alive = 0`.
+
+**Deaths.** Remove every entity with `hp <= 0.0f`, keeping the order of the
+rest (stable compaction of pos, vel, hp); `kills = kills + removed`.
+
+**Spawning.** `n = min(SPAWN_PER_TICK, target_count - count)` (0 when
+`count >= target_count`); for each of the `n`, in order:
+
+    loop: a = unit_f32(rng) * 2.0f - 1.0f; b = unit_f32(rng) * 2.0f - 1.0f
+          l2 = a*a + b*b; if l2 > 1.0f or l2 < 0.0625f: repeat
+    inv = 1.0f / sqrt(l2)
+    r = SPAWN_MIN + unit_f32(rng) * SPAWN_SPAN
+    x = hero_x + (a * inv) * r;  z = hero_z + (b * inv) * r     (then clamped to the bounds, max then min)
+    append with vel 0, hp ENEMY_HP;  spawned = spawned + 1
+
+`target_count` is set by the scenario (the bench keeps it at the initial
+count, so the population stays constant as enemies die).
+
+**Hero death.** While `hero_alive == 0` the hero does not move or fire;
+enemies continue. Restart is a scenario re-init, outside the simulation.
+
+### 4.6 End of tick
 
     tick = tick + 1
+
+### 4.7 Bench input
+
+The recorded bench input is generated: `keys = BENCH_KEYS[(tick / 120) & 3]
+| FIRE` with `BENCH_KEYS = {W, D, S, A}`, and the aim
+`aim = hero + BENCH_AIM[(tick / 30) & 3]` (computed with the hero position
+at the start of the tick: `aim_x = hero_x + ax` as one f32 add), with
+`BENCH_AIM = {(10, 0), (0, 10), (-10, 0), (0, -10)}`.
 
 ## 5. State hash
 
 FNV-1a 64 (offset `0xcbf29ce484222325`, prime `0x100000001b3`) over, in
 order: `count` (4 bytes), `tick` (4), `hero_x`, `hero_z` (4 each), then the
 raw bytes of `pos_x[0..count)`, `pos_z[0..count)`, `vel_x[0..count)`,
-`vel_z[0..count)`. Printed as 16 lowercase hex digits.
+`vel_z[0..count)`, then (SIM 4) `hp[0..count)`, `hero_hp`, `hero_alive`,
+`kills`, `proj_count` (4 each), `proj_x, proj_z[0..proj_count)`. Printed as 16
+lowercase hex digits.
+
+Init (SIM 4) additionally sets `hp[i] = ENEMY_HP`, `hero_hp = HERO_HP`,
+`hero_alive = 1`, `fire_cooldown = 0`, `kills = 0`, `spawned = 0`,
+`spawned_shots = 0`, `proj_count = 0`, `target_count = count`.
 
 ## 6. Rendering instance generation (part of the competed CPU work)
 
