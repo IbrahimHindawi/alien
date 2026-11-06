@@ -2,7 +2,9 @@
 
     blender --background --factory-startup --python blender_render.py -- OUT_DIR SIZE file.mdm [...]
 
-Each file is rendered from front, side, top and 3/4 views to
+With --weights the colour shows the anim weight (dark rigid, white fully
+driven) instead of the albedo, for checking the weight rules. Each file is
+rendered from front, side, top and 3/4 views to
 OUT_DIR/<file name>.<view>.png with Workbench, flat shading and the baked
 vertex colours, on the game's dark blue-violet. Files that share an asset
 name share a camera framing, so LODs compare at the same scale. MDM space
@@ -19,6 +21,8 @@ import bpy
 from mathutils import Vector
 
 argv = sys.argv[sys.argv.index("--") + 1:]
+WEIGHTS = "--weights" in argv  # debug view: anim weight as black-to-white, glow kept
+argv = [a for a in argv if a != "--weights"]
 out_dir, size, files = argv[0], int(argv[1]), argv[2:]
 os.makedirs(out_dir, exist_ok=True)
 
@@ -31,6 +35,8 @@ def read_mdm(path):
     for i in range(nv):
         x, y, z, nx, ny, nz, w, r, g, b, a = struct.unpack_from("<3f3bB4B", data, 48 + 20 * i)
         verts.append((x, -z, y))
+        if WEIGHTS and a == 0:
+            r = g = b = 30 + int(w * 225 / 255)
         cols.append((r, g, b, a))
     idx = struct.unpack_from("<%dI" % ni, data, 48 + 20 * nv)
     faces = [idx[i:i + 3] for i in range(0, ni, 3)]
@@ -110,7 +116,8 @@ for name, group in groups.items():
                 cam_data.type = "PERSP"
                 cam_data.lens = 50
                 cam.location = centre + d * extent * 1.9
-            scene.render.filepath = os.path.join(out_dir, "%s.%s.png" % (os.path.basename(path), view))
+            scene.render.filepath = os.path.join(out_dir, "%s.%s%s.png" % (os.path.basename(path), view,
+                                                                             ".weights" if WEIGHTS else ""))
             bpy.ops.render.render(write_still=True)
         bpy.data.objects.remove(obj)
         bpy.data.meshes.remove(mesh)

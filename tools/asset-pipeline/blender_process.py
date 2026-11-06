@@ -340,16 +340,17 @@ def _piece_bmesh(bmx, face_ids):
     return pb
 
 
-def _reduce_piece(pb, share):
+def _reduce_piece(pb, share, allow_hull=True):
     """Bring one piece to at most share triangles: collapse decimation, or its
-    convex hull decimated when the collapse cannot get there."""
+    convex hull decimated when the collapse cannot get there (never for the
+    main body, which keeps whatever the collapse reached)."""
     pm = bpy.data.meshes.new("piece")
     pb.to_mesh(pm)
     po = bpy.data.objects.new("piece", pm)
     bpy.context.scene.collection.objects.link(po)
     n = _decimate_obj(po, share)
     how = "collapse"
-    if n > share:
+    if n > share and allow_hull:
         hb2 = pb.copy()
         res = bmesh.ops.convex_hull(hb2, input=hb2.verts[:])
         junk = [g for g in res["geom_interior"] + res["geom_unused"] if isinstance(g, bmesh.types.BMVert)]
@@ -439,14 +440,46 @@ def make_lod(budget):
             shares[k] -= 1
         hulls = 0
         geo = bmesh.new()
-        for (area, c), share in zip(info, shares):
+        for k, (area, c) in enumerate(info):
+            if k >= len(shares):
+                break
+            share = shares[k]
             pb = _piece_bmesh(bmx, c)
             bmesh.ops.triangulate(pb, faces=pb.faces[:])
             if len(pb.faces) > share:
-                red, how = _reduce_piece(pb, share)
+                if k == 0:
+                    # the body: if the collapse eats its extremes (the height
+                    # is the silhouette), give it more of the budget
+                    def ext(b):
+                        zs = [v.co.z for v in b.verts]
+                        return max(zs) - min(zs)
+                    h0 = ext(pb)
+                    sh = share
+                    while True:
+                        red, how = _reduce_piece(pb, sh, allow_hull=False)
+                        if ext(red) >= 0.93 * h0 or sh >= int(0.7 * budget):
+                            break
+                        red.free()
+                        sh = min(int(0.7 * budget), int(sh * 1.25) + 1)
+                    share = shares[0] = sh
+                else:
+                    red, how = _reduce_piece(pb, share)
                 pb.free()
                 pb = red
                 hulls += how == "hull"
+            if k == 0 and len(pb.faces) > share:
+                # the body would not collapse that far: the limbs give way,
+                # the smallest pieces first, then the largest shares
+                over = len(pb.faces) - share
+                shares[0] = len(pb.faces)
+                while over > 0 and len(shares) > 1:
+                    ks = [i for i in range(1, len(shares)) if shares[i] > minimum]
+                    if ks:
+                        j = max(ks, key=lambda i: shares[i])
+                        shares[j] -= 1
+                        over -= 1
+                    else:
+                        over -= shares.pop()
             pb.verts.ensure_lookup_table()
             vm = [geo.verts.new(v.co) for v in pb.verts]
             for f in pb.faces:

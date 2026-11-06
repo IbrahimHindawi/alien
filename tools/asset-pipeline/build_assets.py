@@ -203,7 +203,9 @@ def main():
             st = mdmlib.write_mdm(os.path.join(MESHES, "%s.lod%d.mdm" % (name, d)), tris, spec, specs["palette"])
             stats.append(st)
         print("%-10s %-10s tris %s" % (name, sel["source"], [s["triangles"] for s in stats]))
-        results[name] = {"source": source, "steps": steps, "lods": stats,
+        licence = ("unverified: Tripo output; commercial rights only on a paid account, which could not be "
+                   "confirmed (see licence_research)") if source["type"] == "tripo" else                   "original work of this pipeline (procedural); no third-party rights"
+        results[name] = {"source": source, "licence": licence, "steps": steps, "lods": stats,
                          "triangles": [s["triangles"] for s in stats],
                          "process_report": {k: v for k, v in report.items() if k != "steps"},
                          "built": datetime.date.today().isoformat()}

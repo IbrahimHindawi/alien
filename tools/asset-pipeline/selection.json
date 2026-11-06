@@ -1,1 +1,56 @@
-{}
+{
+  "scuttler": {
+    "source": "tripo",
+    "task_id": "fcc20e2e-adcc-490e-bd17-53c4b3aff7ef",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 2 of 3: low wide tick, wedge head, splayed legs; eight legs where the brief says four"
+  },
+  "stalker": {
+    "source": "tripo",
+    "task_id": "2d34d10d-2773-45f8-bae7-e85d706e7e01",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 2: mantis-raptor with long bone scythe blades, digitigrade legs, hunched upright body; the whole beak-like head glows rather than separate eyes"
+  },
+  "seeker": {
+    "source": "tripo",
+    "task_id": "27cfa690-234e-4e16-a0bc-df29cd50af17",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 3 of 3: vertical ring around the eye sphere, orange lens in front, bone fins swept back, nothing below"
+  },
+  "colossus": {
+    "source": "tripo",
+    "task_id": "ecf465f1-6e47-4dca-906d-54d6628a4ddc",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 2: armoured quadruped with a siege tower; red glow on the front proboscis"
+  },
+  "hero": {
+    "source": "tripo",
+    "task_id": "c3042b53-22b7-4961-8f29-6f109aae13ac",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 2: heavy bone pauldrons, rifle across the body, cyan visor"
+  },
+  "monolith": {
+    "source": "tripo",
+    "task_id": "2e98e12a-06d4-4c63-9ac0-0d0cc906f27d",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 1: dark faceted slab, one orange seam on the front, bone ribs"
+  },
+  "pylon": {
+    "source": "tripo",
+    "task_id": "0fd36ff8-b1aa-48a2-91f0-07286cf886d5",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 1: rusted lattice tower with cross-arms and a bent vane; thin rods vanish at distance as intended"
+  },
+  "rock_spire": {
+    "source": "tripo",
+    "task_id": "3fa24d62-c22c-49a4-9030-ac75be7cfdbe",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 1: tall faceted spire with bone mineral facets; the small surface nubs vanish at distance"
+  },
+  "hive_spire": {
+    "source": "tripo",
+    "task_id": "92cbbcdd-6bec-44fc-ba26-b4c6e372c576",
+    "yaw_deg": -90,
+    "review": "accepted on attempt 1: twisted spire with bone ribs and orange pores near the top; the flared foot reads as roots"
+  }
+}

@@ -18,7 +18,9 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:07:43.427876Z",
-      "cache": "cache/ba5aba1c-db9e-430b-afa9-728ff4a6b0ba/model.glb"
+      "cache": "cache/ba5aba1c-db9e-430b-afa9-728ff4a6b0ba/model.glb",
+      "verdict": "rejected",
+      "review": "six legs plus antennae against a four-legged brief; a tall generic beetle dome, no wedge head, no bone ridge; LOD2 lost the legs"
     },
     {
       "task_id": "fcc20e2e-adcc-490e-bd17-53c4b3aff7ef",
@@ -38,7 +40,9 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:13:09.773315Z",
-      "cache": "cache/fcc20e2e-adcc-490e-bd17-53c4b3aff7ef/model.glb"
+      "cache": "cache/fcc20e2e-adcc-490e-bd17-53c4b3aff7ef/model.glb",
+      "verdict": "accepted",
+      "review": "low wide tick, wedge head, splayed legs; eight legs where the brief says four"
     },
     {
       "task_id": "6087f773-33db-409c-bbf7-05d1b034392c",
@@ -58,7 +62,9 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:16:45.113908Z",
-      "cache": "cache/6087f773-33db-409c-bbf7-05d1b034392c/model.glb"
+      "cache": "cache/6087f773-33db-409c-bbf7-05d1b034392c/model.glb",
+      "verdict": "rejected",
+      "review": "strong arrowhead body, but eight short legs tucked under it, not splayed; fails the low/wide aspect check (width/height 1.23 < 1.4)"
     }
   ],
   "stalker": [
@@ -80,7 +86,31 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:08:53.571431Z",
-      "cache": "cache/55eac2b4-4479-485a-8063-75bdedc31963/model.glb"
+      "cache": "cache/55eac2b4-4479-485a-8063-75bdedc31963/model.glb",
+      "verdict": "rejected",
+      "review": "spiky hunched ape: squat legs, small claws instead of long blade forelimbs, no clear digitigrade legs; also turned 45 degrees"
+    },
+    {
+      "task_id": "2d34d10d-2773-45f8-bae7-e85d706e7e01",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien stalker, a lean insectoid predator like a praying mantis crossed with a raptor: it stands on two digitigrade reverse-knee legs bent backwards like a bird's, its narrow body hunched forward, and its two forearms are huge long flat scythe blades, each as long as its legs, held forward and down. A narrow wedge-shaped head with glowing orange eyes, a row of pale bone spikes along the hunched back. Colours: dark graphite grey chitin, gunmetal grey joints, pale bone blades and spikes, glowing orange eyes only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+      "negative_prompt": "gorilla, ape, humanoid, bulky, fat, robot, hands, fingers, small claws, tail, wings, pedestal, base, ground plane, fur, hair, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien stalker, a lean insectoid predator like a praying mantis crossed with a raptor: it stands on two digitigrade reverse-knee legs bent backwards like a bird's, its narrow body hunched forward, and its two forearms are huge long flat scythe blades, each as long as its legs, held forward and down. A narrow wedge-shaped head with glowing orange eyes, a row of pale bone spikes along the hunched back. Colours: dark graphite grey chitin, gunmetal grey joints, pale bone blades and spikes, glowing orange eyes only. Large flat angular planes, hard edges, no greebles. Standing neutral pose, facing forward, single creature, no base, no pedestal, no ground.",
+        "negative_prompt": "gorilla, ape, humanoid, bulky, fat, robot, hands, fingers, small claws, tail, wings, pedestal, base, ground plane, fur, hair, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 800
+      },
+      "created": "2026-11-06T09:34:19+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:35:06.736747Z",
+      "cache": "cache/2d34d10d-2773-45f8-bae7-e85d706e7e01/model.glb",
+      "verdict": "accepted",
+      "review": "mantis-raptor with long bone scythe blades, digitigrade legs, hunched upright body; the whole beak-like head glows rather than separate eyes"
     }
   ],
   "seeker": [
@@ -102,7 +132,53 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:09:57.720635Z",
-      "cache": "cache/23e68fcd-e696-485d-9386-79ecae093c5f/model.glb"
+      "cache": "cache/23e68fcd-e696-485d-9386-79ecae093c5f/model.glb",
+      "verdict": "rejected",
+      "review": "spiked ball whose downward bone spikes read as legs; no ring"
+    },
+    {
+      "task_id": "5314c82e-a978-4864-b8d0-10ef9560f6fe",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted floating alien sentinel eye: a single round armoured sphere hovering in the air, one big glowing orange lens on its front, one large flat angular ring standing vertically around the sphere like a gimbal, and four short flat blade fins at the back of the sphere pointing backwards. Nothing hangs below it: no legs, no spikes underneath. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no stand, no ground.",
+      "negative_prompt": "legs, feet, spikes underneath, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted floating alien sentinel eye: a single round armoured sphere hovering in the air, one big glowing orange lens on its front, one large flat angular ring standing vertically around the sphere like a gimbal, and four short flat blade fins at the back of the sphere pointing backwards. Nothing hangs below it: no legs, no spikes underneath. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no stand, no ground.",
+        "negative_prompt": "legs, feet, spikes underneath, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 500
+      },
+      "created": "2026-11-06T09:35:17+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:36:05.941963Z",
+      "cache": "cache/5314c82e-a978-4864-b8d0-10ef9560f6fe/model.glb",
+      "verdict": "rejected",
+      "review": "eye lens on a spiked sphere: no ring, no fins, and the spikes that set its height collapse away at LOD2 (0.70 m against 0.9 m)"
+    },
+    {
+      "task_id": "27cfa690-234e-4e16-a0bc-df29cd50af17",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted floating alien drone shaped like a gyroscope: a smooth round armoured eye sphere in the centre with one big glowing orange lens on its front, held inside one large thick flat octagonal ring that stands upright around the sphere and is wider than the sphere, and two flat swept-back blade fins at the back. The ring is the biggest shape. No spikes, nothing below it: no legs, no stand. Colours: dark graphite grey sphere, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no ground.",
+      "negative_prompt": "spikes, thorns, legs, feet, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted floating alien drone shaped like a gyroscope: a smooth round armoured eye sphere in the centre with one big glowing orange lens on its front, held inside one large thick flat octagonal ring that stands upright around the sphere and is wider than the sphere, and two flat swept-back blade fins at the back. The ring is the biggest shape. No spikes, nothing below it: no legs, no stand. Colours: dark graphite grey sphere, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no ground.",
+        "negative_prompt": "spikes, thorns, legs, feet, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 500
+      },
+      "created": "2026-11-06T09:40:16+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:41:10.338202Z",
+      "cache": "cache/27cfa690-234e-4e16-a0bc-df29cd50af17/model.glb",
+      "verdict": "accepted",
+      "review": "vertical ring around the eye sphere, orange lens in front, bone fins swept back, nothing below"
     }
   ],
   "colossus": [
@@ -124,7 +200,9 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:10:58.876433Z",
-      "cache": "cache/4ab6d47b-b829-47b9-a287-11334a25d129/model.glb"
+      "cache": "cache/4ab6d47b-b829-47b9-a287-11334a25d129/model.glb",
+      "verdict": "rejected",
+      "review": "a bipedal humanoid mech, a generic robot the art direction forbids; not a quadruped"
     },
     {
       "task_id": "ecf465f1-6e47-4dca-906d-54d6628a4ddc",
@@ -144,7 +222,9 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:17:46.371783Z",
-      "cache": "cache/ecf465f1-6e47-4dca-906d-54d6628a4ddc/model.glb"
+      "cache": "cache/ecf465f1-6e47-4dca-906d-54d6628a4ddc/model.glb",
+      "verdict": "accepted",
+      "review": "armoured quadruped with a siege tower; red glow on the front proboscis"
     }
   ],
   "hero": [
@@ -166,7 +246,9 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:11:55.193070Z",
-      "cache": "cache/51d844d1-c703-4fa4-967f-010506f3f5e2/model.glb"
+      "cache": "cache/51d844d1-c703-4fa4-967f-010506f3f5e2/model.glb",
+      "verdict": "rejected",
+      "review": "generic power-armour soldier in one flat grey, no visor glow in the texture, no bone trim to speak of; reads as a space-marine copy"
     },
     {
       "task_id": "c3042b53-22b7-4961-8f29-6f109aae13ac",
@@ -186,7 +268,105 @@
       "status": "success",
       "credits": 40.0,
       "completed": "2026-11-06T05:19:17.893987Z",
-      "cache": "cache/c3042b53-22b7-4961-8f29-6f109aae13ac/model.glb"
+      "cache": "cache/c3042b53-22b7-4961-8f29-6f109aae13ac/model.glb",
+      "verdict": "accepted",
+      "review": "heavy bone pauldrons, rifle across the body, cyan visor"
+    }
+  ],
+  "monolith": [
+    {
+      "task_id": "2e98e12a-06d4-4c63-9ac0-0d0cc906f27d",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien monolith: a tall angular slab of dark stone-like alien material, slightly tapered and bent, carved with a few large chitin-like plates, a single narrow vertical seam of glowing orange light on its front face, bone-coloured ribs at its edges. Colours: dark graphite grey, gunmetal grey, pale bone ribs, glowing orange seam only. Large flat planes, hard edges, no greebles. Single object, no base platform, no ground.",
+      "negative_prompt": "pedestal, base, ground plane, text, runes, people, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien monolith: a tall angular slab of dark stone-like alien material, slightly tapered and bent, carved with a few large chitin-like plates, a single narrow vertical seam of glowing orange light on its front face, bone-coloured ribs at its edges. Colours: dark graphite grey, gunmetal grey, pale bone ribs, glowing orange seam only. Large flat planes, hard edges, no greebles. Single object, no base platform, no ground.",
+        "negative_prompt": "pedestal, base, ground plane, text, runes, people, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 1500
+      },
+      "created": "2026-11-06T09:36:22+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:37:12.427654Z",
+      "cache": "cache/2e98e12a-06d4-4c63-9ac0-0d0cc906f27d/model.glb",
+      "verdict": "accepted",
+      "review": "dark faceted slab, one orange seam on the front, bone ribs"
+    }
+  ],
+  "pylon": [
+    {
+      "task_id": "0fd36ff8-b1aa-48a2-91f0-07286cf886d5",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted ruined industrial power pylon: a broken steel lattice tower made of a few thick angular beams, bent and snapped near the top, rusted. Colours: gunmetal grey steel, dark graphite grey, rust brown oxide patches. Large flat planes, thick beams, hard edges, no thin wires, no cables, no greebles. Single object, no ground, no base platform.",
+      "negative_prompt": "wires, cables, thin lines, ground plane, base, people, text, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted ruined industrial power pylon: a broken steel lattice tower made of a few thick angular beams, bent and snapped near the top, rusted. Colours: gunmetal grey steel, dark graphite grey, rust brown oxide patches. Large flat planes, thick beams, hard edges, no thin wires, no cables, no greebles. Single object, no ground, no base platform.",
+        "negative_prompt": "wires, cables, thin lines, ground plane, base, people, text, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 1500
+      },
+      "created": "2026-11-06T09:37:19+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:38:11.938925Z",
+      "cache": "cache/0fd36ff8-b1aa-48a2-91f0-07286cf886d5/model.glb",
+      "verdict": "accepted",
+      "review": "rusted lattice tower with cross-arms and a bent vane; thin rods vanish at distance as intended"
+    }
+  ],
+  "rock_spire": [
+    {
+      "task_id": "3fa24d62-c22c-49a4-9030-ac75be7cfdbe",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien rock spire: a tall jagged pointed rock column made of a few large angular crystalline facets, slightly leaning, with pale bone-coloured mineral bands. Colours: dark graphite grey rock, gunmetal grey facets, pale bone bands. Large flat planes, hard edges, no small rocks, no greebles. Single object, no ground, no base platform.",
+      "negative_prompt": "ground plane, base, grass, trees, people, small rocks, bright colours",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien rock spire: a tall jagged pointed rock column made of a few large angular crystalline facets, slightly leaning, with pale bone-coloured mineral bands. Colours: dark graphite grey rock, gunmetal grey facets, pale bone bands. Large flat planes, hard edges, no small rocks, no greebles. Single object, no ground, no base platform.",
+        "negative_prompt": "ground plane, base, grass, trees, people, small rocks, bright colours",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 1500
+      },
+      "created": "2026-11-06T09:38:17+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:39:03.071440Z",
+      "cache": "cache/3fa24d62-c22c-49a4-9030-ac75be7cfdbe/model.glb",
+      "verdict": "accepted",
+      "review": "tall faceted spire with bone mineral facets; the small surface nubs vanish at distance"
+    }
+  ],
+  "hive_spire": [
+    {
+      "task_id": "92cbbcdd-6bec-44fc-ba26-b4c6e372c576",
+      "model_version": "P1-20260311",
+      "prompt": "Ultra low poly faceted alien hive spire: a tall twisted organic-mechanical tower of angular chitin plates and bone ribs, tapering to a sharp point, with a few glowing orange pores near the top. Colours: dark graphite grey chitin, gunmetal grey plates, pale bone ribs, glowing orange pores only. Large flat angular planes, hard edges, no greebles. Single object, no ground, no base platform.",
+      "negative_prompt": "ground plane, base, people, creatures, text, bright colours, smooth",
+      "request": {
+        "model": "P1-20260311",
+        "prompt": "Ultra low poly faceted alien hive spire: a tall twisted organic-mechanical tower of angular chitin plates and bone ribs, tapering to a sharp point, with a few glowing orange pores near the top. Colours: dark graphite grey chitin, gunmetal grey plates, pale bone ribs, glowing orange pores only. Large flat angular planes, hard edges, no greebles. Single object, no ground, no base platform.",
+        "negative_prompt": "ground plane, base, people, creatures, text, bright colours, smooth",
+        "texture": true,
+        "pbr": false,
+        "texture_quality": "standard",
+        "face_limit": 1500
+      },
+      "created": "2026-11-06T09:39:14+04:00",
+      "status": "success",
+      "credits": 40.0,
+      "completed": "2026-11-06T05:40:02.828988Z",
+      "cache": "cache/92cbbcdd-6bec-44fc-ba26-b4c6e372c576/model.glb",
+      "verdict": "accepted",
+      "review": "twisted spire with bone ribs and orange pores near the top; the flared foot reads as roots"
     }
   ]
 }

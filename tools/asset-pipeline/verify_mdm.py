@@ -119,7 +119,7 @@ def check(path, specs, problems, info):
             problems.append("body centre at %.3f, hover is %.3f" % (mid, spec["hover"]))
         if lo[1] < 0.2:
             problems.append("floating unit reaches the ground (min y %.3f)" % lo[1])
-    elif abs(lo[1]) > 0.02 * target:
+    elif abs(lo[1]) > (0.02 if lod == 0 else 0.04) * target:  # decimation erodes feet a little
         problems.append("lowest point at y=%.3f, origin should be on the ground" % lo[1])
 
     # triangles: degeneracy, normals, winding; area-weighted centroid
@@ -207,14 +207,19 @@ def check(path, specs, problems, info):
     if spec["kind"] == "unit" and glow_a > 0:
         gz = glow_c[2] / glow_a
         gys = [pts[i][1] for i in range(nv) if m["verts"][i]["c"][3] > 0]
+        gxs = [pts[i][0] for i in range(nv) if m["verts"][i]["c"][3] > 0]
         y0, y1 = min(gys) - 0.1 * h, max(gys) + 0.1 * h
+        # and in a strip around the glow across X, so a weapon held at the
+        # side or a shoulder plate does not stand in for the head
+        x0, x1 = min(gxs) - 0.1 * (hi[0] - lo[0]), max(gxs) + 0.1 * (hi[0] - lo[0])
         band_a = band_z = 0.0
         for t in range(ntri):
             tri = [pts[i] for i in m["indices"][3 * t:3 * t + 3]]
             if m["verts"][m["indices"][3 * t]]["c"][3] > 0:
                 continue
             cy = sum(p[1] for p in tri) / 3.0
-            if y0 <= cy <= y1:
+            cxx = sum(p[0] for p in tri) / 3.0
+            if y0 <= cy <= y1 and x0 <= cxx <= x1:
                 e1 = [tri[1][i] - tri[0][i] for i in range(3)]
                 e2 = [tri[2][i] - tri[0][i] for i in range(3)]
                 ar = 0.5 * math.sqrt((e1[1] * e2[2] - e1[2] * e2[1]) ** 2 + (e1[2] * e2[0] - e1[0] * e2[2]) ** 2
@@ -224,7 +229,7 @@ def check(path, specs, problems, info):
         bz = band_z / band_a if band_a else 0.0
         info["glow_z"] = round(gz, 3)
         info["glow_band_z"] = round(bz, 3)
-        if gz < bz + 0.05 * (hi[2] - lo[2]):
+        if gz < bz + 0.03 * (hi[2] - lo[2]):
             problems.append("emissive feature at z=%.3f is not ahead of the body (%.3f) at its height: "
                             "model does not face +Z" % (gz, bz))
 

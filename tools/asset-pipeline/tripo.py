@@ -156,7 +156,11 @@ def generate_attempt(name, spec, attempts_path=ATTEMPTS, model=DEFAULT_MODEL, fa
     else:
         rec["error"] = "%s %s" % (d.get("error_code"), d.get("error_message"))
     attempts = _load(attempts_path)
-    attempts[name] = [rec if x.get("task_id") == rec["task_id"] else x for x in attempts.get(name, [])]
+    lst = attempts.setdefault(name, [])
+    if any(x.get("task_id") == rec["task_id"] for x in lst):
+        attempts[name] = [dict(x, **rec) if x.get("task_id") == rec["task_id"] else x for x in lst]
+    else:  # a concurrent writer dropped the submitted record: put it back
+        lst.append(rec)
     _save(attempts_path, attempts)
     print("%s: task %s %s, credits %s" % (name, rec["task_id"], rec["status"], rec.get("credits")), flush=True)
     return rec

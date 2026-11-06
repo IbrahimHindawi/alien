@@ -160,8 +160,8 @@
       },
       "anim": {
         "mode": "radial",
-        "radial_min": 0.75,
-        "radial_max": 1.25
+        "radial_min": 0.7,
+        "radial_max": 1.0
       },
       "aspect": {
         "width_over_height": [
@@ -173,8 +173,8 @@
           2.2
         ]
       },
-      "prompt": "Ultra low poly faceted floating alien sentinel eye: a single round armoured sphere hovering in the air, one big glowing orange lens on its front, one large flat angular ring standing vertically around the sphere like a gimbal, and four short flat blade fins at the back of the sphere pointing backwards. Nothing hangs below it: no legs, no spikes underneath. Colours: dark graphite grey shell, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no stand, no ground.",
-      "negative_prompt": "legs, feet, spikes underneath, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
+      "prompt": "Ultra low poly faceted floating alien drone shaped like a gyroscope: a smooth round armoured eye sphere in the centre with one big glowing orange lens on its front, held inside one large thick flat octagonal ring that stands upright around the sphere and is wider than the sphere, and two flat swept-back blade fins at the back. The ring is the biggest shape. No spikes, nothing below it: no legs, no stand. Colours: dark graphite grey sphere, gunmetal grey ring, pale bone fins, glowing orange lens only. Large flat angular planes, hard edges, no greebles. Hovering, facing forward, single object, no base, no pedestal, no ground.",
+      "negative_prompt": "spikes, thorns, legs, feet, tentacles, arms, stand, pedestal, base, ground plane, cables, wires, text, bright colours",
       "tone": {
         "dark": 0.5,
         "bone": 0.1
@@ -323,7 +323,7 @@
       },
       "aspect": {
         "height_over_width": [
-          1.5,
+          0.9,
           8.0
         ]
       },
