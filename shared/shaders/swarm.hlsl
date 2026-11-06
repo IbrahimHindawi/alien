@@ -1,13 +1,14 @@
 // MILLION DEAD shared shaders. Both engines bind exactly these, compiled once
 // by tools/build.py with fxc into build/shaders/*.cso.
 //
-// Constant buffer b0 layout (208 bytes), mirrored by both engines' structs:
+// Constant buffer b0 layout (208 bytes, 224 with screen), mirrored by both engines' structs:
 //   0   row_major float4x4 view_proj
 //   64  float4 camera_pos      xyz camera position, w = time in seconds
 //   80  float4 light_dir       xyz unit vector toward the light, w = ambient
 //   96  float4 fog_color       rgb, a = density
 //   112 float4 params          x = fog height falloff, y = hero flash, z = unit scale, w = unused
 //   128 row_major float4x4 hero_world
+//   192 float4 screen          x = width, y = height in pixels
 
 cbuffer Frame : register(b0)
 {
@@ -17,6 +18,7 @@ cbuffer Frame : register(b0)
     float4 fog_color;
     float4 params;
     row_major float4x4 hero_world;
+    float4 screen;
 };
 
 struct VsMesh
@@ -141,4 +143,27 @@ float4 ps_ground(VsOut i) : SV_Target
     c *= 0.6 + 0.6 * ndl;
     c = apply_fog(c, i.world);
     return float4(c, 1.0);
+}
+
+// HUD: instanced screen-space rectangles, no vertex buffer. Instance:
+// RECT = (x, y, w, h) in pixels from the top left, COLOR = rgba (linear).
+struct UiOut
+{
+    float4 clip  : SV_Position;
+    float4 color : COLOR;
+};
+
+UiOut vs_ui(uint vid : SV_VertexID, float4 rect : RECT, float4 color : COLOR)
+{
+    float2 corners[6] = { float2(0, 0), float2(1, 0), float2(1, 1), float2(0, 0), float2(1, 1), float2(0, 1) };
+    float2 p = rect.xy + corners[vid] * rect.zw;
+    UiOut o;
+    o.clip = float4(p.x / screen.x * 2.0 - 1.0, 1.0 - p.y / screen.y * 2.0, 0.0, 1.0);
+    o.color = color;
+    return o;
+}
+
+float4 ps_ui(UiOut i) : SV_Target
+{
+    return i.color;
 }

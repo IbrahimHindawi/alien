@@ -27,6 +27,8 @@ SHADERS = [  # (file, entry, profile, output)
     ('swarm.hlsl', 'ps_ground', 'ps_5_0', 'ground_ps.cso'),
     ('swarm.hlsl', 'vs_hero', 'vs_5_0', 'hero_vs.cso'),
     ('swarm.hlsl', 'vs_particle', 'vs_5_0', 'particle_vs.cso'),
+    ('swarm.hlsl', 'vs_ui', 'vs_5_0', 'ui_vs.cso'),
+    ('swarm.hlsl', 'ps_ui', 'ps_5_0', 'ui_ps.cso'),
 ]
 
 

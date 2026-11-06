@@ -1,0 +1,358 @@
+; renderer/ui.rasm: HUD and performance overlay
+;
+; Screen-space rectangles in pixels, gathered in a CPU array each frame and
+; drawn as instanced quads (vs_ui/ps_ui) with alpha blending and no depth.
+; Text is the 5x7 ui_font, one rectangle per lit pixel.
+
+#define UI_MAX 16384
+#define UI_STRIDE 32
+
+UiInstance: struct = {
+    x: f32
+    y: f32
+    w: f32
+    h: f32
+    r: f32
+    g: f32
+    b: f32
+    a: f32
+}
+
+ui_data: [UI_MAX]UiInstance = {}
+ui_count: u32 = 0
+ui_buffer: *ID3D11Buffer = {}
+vs_ui_shader: *ID3D11VertexShader = {}
+ps_ui_shader: *ID3D11PixelShader = {}
+ui_layout: *ID3D11InputLayout = {}
+ui_blend: *ID3D11BlendState = {}
+ui_depth: *ID3D11DepthStencilState = {}
+ui_raster: *ID3D11RasterizerState = {}
+ui_stride: u32 = UI_STRIDE
+ui_offset: u32 = 0
+ui_text_buf: [128]u8 = {}
+ui_text_len: u32 = 0
+ui_digits: [16]u8 = {}
+
+ui_buffer_desc: D3D11_BUFFER_DESC = {
+    .ByteWidth = UI_MAX * UI_STRIDE,
+    .Usage = D3D11_USAGE.D3D11_USAGE_DYNAMIC,
+    .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
+    .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
+}
+ui_layout_desc: [2]const D3D11_INPUT_ELEMENT_DESC = {
+    { .SemanticName = "RECT", .Format = DXGI_FORMAT.DXGI_FORMAT_R32G32B32A32_FLOAT, .AlignedByteOffset = 0,
+      .InputSlotClass = D3D11_INPUT_CLASSIFICATION.D3D11_INPUT_PER_INSTANCE_DATA, .InstanceDataStepRate = 1 },
+    { .SemanticName = "COLOR", .Format = DXGI_FORMAT.DXGI_FORMAT_R32G32B32A32_FLOAT, .AlignedByteOffset = 16,
+      .InputSlotClass = D3D11_INPUT_CLASSIFICATION.D3D11_INPUT_PER_INSTANCE_DATA, .InstanceDataStepRate = 1 },
+}
+ui_blend_desc: D3D11_BLEND_DESC = {
+    .RenderTarget = {
+        {
+            .BlendEnable = 1,
+            .SrcBlend = D3D11_BLEND.D3D11_BLEND_SRC_ALPHA,
+            .DestBlend = D3D11_BLEND.D3D11_BLEND_INV_SRC_ALPHA,
+            .BlendOp = D3D11_BLEND_OP.D3D11_BLEND_OP_ADD,
+            .SrcBlendAlpha = D3D11_BLEND.D3D11_BLEND_ONE,
+            .DestBlendAlpha = D3D11_BLEND.D3D11_BLEND_INV_SRC_ALPHA,
+            .BlendOpAlpha = D3D11_BLEND_OP.D3D11_BLEND_OP_ADD,
+            .RenderTargetWriteMask = 15,
+        },
+    },
+}
+ui_depth_desc: D3D11_DEPTH_STENCIL_DESC = {
+    .DepthEnable = 0,
+    .DepthWriteMask = D3D11_DEPTH_WRITE_MASK.D3D11_DEPTH_WRITE_MASK_ZERO,
+    .DepthFunc = D3D11_COMPARISON_FUNC.D3D11_COMPARISON_ALWAYS,
+}
+ui_raster_desc: D3D11_RASTERIZER_DESC = {
+    .FillMode = D3D11_FILL_MODE.D3D11_FILL_SOLID,
+    .CullMode = D3D11_CULL_MODE.D3D11_CULL_NONE,
+    .DepthClipEnable = 1,
+}
+
+; colours (linear rgba)
+col_text: [4]const f32[align(16)] = { 0.85, 0.82, 0.74, 1.0 }
+col_dim: [4]const f32[align(16)] = { 0.45, 0.45, 0.48, 1.0 }
+col_cyan: [4]const f32[align(16)] = { 0.05, 0.75, 1.0, 1.0 }
+col_orange: [4]const f32[align(16)] = { 1.0, 0.35, 0.05, 1.0 }
+col_red: [4]const f32[align(16)] = { 1.0, 0.04, 0.05, 1.0 }
+col_panel: [4]const f32[align(16)] = { 0.0, 0.0, 0.0, 0.55 }
+col_track: [4]const f32[align(16)] = { 0.08, 0.08, 0.09, 0.85 }
+
+; -------------------------------------------------------------------------
+
+; Create the UI pipeline objects. -> eax 1 ok
+ui_init: proc() -> b32 = {
+    push rbx
+    sub rsp, 48                        ; 8 + 8 + 48 = 64
+    vcall(device, ID3D11DeviceVtbl.CreateBuffer, ui_buffer_desc&, 0, ui_buffer&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\ui_vs.cso")
+    mov rbx, rax
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rbx, render_shader_size, 0, vs_ui_shader&)
+    test eax, eax
+    js failed
+    vcall(device, ID3D11DeviceVtbl.CreateInputLayout, ui_layout_desc&, 2, rbx, render_shader_size, ui_layout&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\ui_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_ui_shader&)
+    test eax, eax
+    js failed
+    vcall(device, ID3D11DeviceVtbl.CreateBlendState, ui_blend_desc&, ui_blend&)
+    vcall(device, ID3D11DeviceVtbl.CreateDepthStencilState, ui_depth_desc&, ui_depth&)
+    vcall(device, ID3D11DeviceVtbl.CreateRasterizerState, ui_raster_desc&, ui_raster&)
+    mov eax, 1
+    jmp done
+failed:
+    xor eax, eax
+done:
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+; xmm0 x, xmm1 y, xmm2 w, xmm3 h (pixels), rcx: colour (4 floats)
+ui_rect: proc() = {
+    mov eax, ui_count
+    cmp eax, UI_MAX
+    jae full
+    imul rax, rax, UI_STRIDE
+    lea rdx, ui_data
+    add rdx, rax
+    vmovss dword ptr [rdx], xmm0
+    vmovss dword ptr [rdx + 4], xmm1
+    vmovss dword ptr [rdx + 8], xmm2
+    vmovss dword ptr [rdx + 12], xmm3
+    vmovups xmm4, xmmword ptr [rcx]
+    vmovups xmmword ptr [rdx + 16], xmm4
+    inc ui_count
+full:
+    ret
+}
+
+; xmm0 x, xmm1 y, xmm2 pixel size, rcx: NUL-terminated text, rdx: colour -> xmm0: x after the text
+ui_text: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    sub rsp, 104                       ; 8 + 48 + 104 = 160; xmm6..9 at [rsp + 32 ..]
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    movaps xmmword ptr [rsp + 64], xmm8
+    movaps xmmword ptr [rsp + 80], xmm9
+    vmovss xmm6, xmm0, xmm0            ; pen x
+    vmovss xmm7, xmm1, xmm1            ; y
+    vmovss xmm8, xmm2, xmm2            ; pixel
+    mov rsi, rcx
+    mov r14, rdx
+char:
+    movzx ebx, byte ptr [rsi]
+    test ebx, ebx
+    jz done
+    cmp ebx, 128
+    jae advance
+    imul ebx, ebx, 7
+    lea r12, ui_font
+    add r12, rbx
+    xor r13d, r13d                     ; row
+row:
+    movzx edi, byte ptr [r12 + r13]
+    xor ebx, ebx                       ; column
+col:
+    bt edi, 4
+    jnc dark
+        vcvtsi2ss xmm0, xmm0, ebx
+        vmulss xmm0, xmm0, xmm8
+        vaddss xmm0, xmm0, xmm6
+        vcvtsi2ss xmm1, xmm1, r13d
+        vmulss xmm1, xmm1, xmm8
+        vaddss xmm1, xmm1, xmm7
+        vmovss xmm2, xmm8, xmm8
+        vmovss xmm3, xmm8, xmm8
+        mov rcx, r14
+        call ui_rect
+    dark:
+    shl edi, 1
+    inc ebx
+    cmp ebx, 5
+    jb col
+    inc r13d
+    cmp r13d, 7
+    jb row
+advance:
+    vmulss xmm0, xmm8, k_ui_advance
+    vaddss xmm6, xmm6, xmm0
+    inc rsi
+    jmp char
+done:
+    vmovss xmm0, xmm6, xmm6
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    movaps xmm8, xmmword ptr [rsp + 64]
+    movaps xmm9, xmmword ptr [rsp + 80]
+    add rsp, 104
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+k_ui_advance: const f32 = 6.0
+
+; text building: ui_text_buf, appended to
+ui_str_clear: proc() = {
+    mov ui_text_len, 0
+    mov byte ptr ui_text_buf[0], 0
+    ret
+}
+
+; rcx: NUL-terminated text to append
+ui_str_cat: proc(text: *const u8) = {
+    lea rdx, ui_text_buf
+    mov eax, ui_text_len
+again:
+    cmp eax, 120
+    jae done
+    mov r8b, byte ptr [rcx]
+    test r8b, r8b
+    jz done
+    mov byte ptr [rdx + rax], r8b
+    inc rcx
+    inc eax
+    jmp again
+done:
+    mov byte ptr [rdx + rax], 0
+    mov ui_text_len, eax
+    ret
+}
+
+; ecx: a u32 to append in decimal
+ui_str_u32: proc(value: u32) = {
+    sub rsp, 40
+    lea r8, ui_digits
+    add r8, 15
+    mov byte ptr [r8], 0
+    mov eax, ecx
+    mov r9d, 10
+digit:
+    xor edx, edx
+    div r9d
+    add dl, 48
+    dec r8
+    mov byte ptr [r8], dl
+    test eax, eax
+    jnz digit
+    mov rcx, r8
+    call ui_str_cat
+    add rsp, 40
+    ret
+}
+
+; ecx: microseconds, appended as milliseconds with two decimals
+ui_str_ms: proc(us: u32) = {
+    push rbx
+    sub rsp, 32
+    mov eax, ecx
+    xor edx, edx
+    mov ebx, 1000
+    div ebx
+    mov ebx, edx                       ; remainder in us
+    mov ecx, eax
+    call ui_str_u32
+    invoke(ui_str_cat, ".")
+    mov eax, ebx
+    xor edx, edx
+    mov ecx, 10
+    div ecx                            ; hundredths of a ms
+    cmp eax, 10
+    jae two
+        push rax
+        sub rsp, 8
+        invoke(ui_str_cat, "0")
+        add rsp, 8
+        pop rax
+    two:
+    mov ecx, eax
+    call ui_str_u32
+    invoke(ui_str_cat, " MS")
+    add rsp, 32
+    pop rbx
+    ret
+}
+
+; xmm0 x, xmm1 y, xmm2 w, xmm3 h, xmm4 fraction 0..1, rcx: fill colour. A bar with a dark track.
+ui_bar: proc() = {
+    push rbx
+    sub rsp, 112                       ; 8 + 8 + 112 = 128; [rsp + 96]: the fraction
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    movaps xmmword ptr [rsp + 64], xmm8
+    movaps xmmword ptr [rsp + 80], xmm9
+    mov rbx, rcx
+    vmovss xmm6, xmm0, xmm0
+    vmovss xmm7, xmm1, xmm1
+    vmovss xmm8, xmm2, xmm2
+    vmovss xmm9, xmm3, xmm3
+    vxorps xmm5, xmm5, xmm5
+    vmaxss xmm4, xmm4, xmm5
+    vminss xmm4, xmm4, k_ui_one
+    vmovss dword ptr [rsp + 96], xmm4
+    lea rcx, col_track
+    call ui_rect
+    vmovss xmm0, xmm6, xmm6
+    vmovss xmm1, xmm7, xmm7
+    vmulss xmm2, xmm8, dword ptr [rsp + 96]
+    vmovss xmm3, xmm9, xmm9
+    mov rcx, rbx
+    call ui_rect
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    movaps xmm8, xmmword ptr [rsp + 64]
+    movaps xmm9, xmmword ptr [rsp + 80]
+    add rsp, 112
+    pop rbx
+    ret
+}
+k_ui_one: const f32 = 1.0
+
+; Upload and draw everything gathered this frame.
+ui_flush: proc() = {
+    push rsi
+    push rdi
+    sub rsp, 56                        ; 8 + 16 + 56 = 80
+    mov eax, ui_count
+    test eax, eax
+    jz done
+    vcall(context, ID3D11DeviceContextVtbl.Map, ui_buffer, 0, D3D11_MAP.D3D11_MAP_WRITE_DISCARD, 0, mapped&)
+    test eax, eax
+    js done
+    mov rdi, mapped.pData
+    lea rsi, ui_data
+    mov ecx, ui_count
+    shl ecx, 5
+    rep movsb
+    vcall(context, ID3D11DeviceContextVtbl.Unmap, ui_buffer, 0)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetBlendState, ui_blend, 0, 0xFFFFFFFF)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, ui_depth, 0)
+    vcall(context, ID3D11DeviceContextVtbl.RSSetState, ui_raster)
+    vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, ui_layout)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, ui_buffer&, ui_stride&, ui_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_ui_shader, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_ui_shader, 0, 0)
+    mov r8d, ui_count
+    vcall(context, ID3D11DeviceContextVtbl.DrawInstanced, 6, r8, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetBlendState, 0, 0, 0xFFFFFFFF)
+done:
+    mov ui_count, 0
+    add rsp, 56
+    pop rdi
+    pop rsi
+    ret
+}

@@ -1,0 +1,241 @@
+; gameplay/hud.rasm: what the player sees on top of the world
+;
+;   top left      performance overlay: engine, FPS, frame, simulation, aliens, visible
+;   top centre    kills
+;   bottom left   health and energy bars, ability cooldowns
+;   centre        the death message
+
+stat_frame_us: u32 = 0
+stat_sim_us: u32 = 0
+k_hud_x: const f32 = 24.0
+k_hud_line: const f32 = 20.0
+k_hud_small: const f32 = 2.0
+k_hud_big: const f32 = 5.0
+k_hud_mid: const f32 = 3.0
+k_hud_bar_w: const f32 = 320.0
+k_hud_bar_h: const f32 = 16.0
+k_hud_100: const f32 = 100.0
+k_hud_pip_w: const f32 = 100.0
+k_hud_pip_h: const f32 = 10.0
+k_dash_cd: const f32 = 45.0
+k_pulse_cd: const f32 = 240.0
+k_bomb_cd: const f32 = 480.0
+k_hud_kills_x: const f32 = -150.0
+
+; ecx: line number of the overlay -> xmm0 x, xmm1 y, xmm2 size for small text
+hud_line: proc(line: u32) = {
+    vmovss xmm0, k_hud_x
+    vcvtsi2ss xmm1, xmm1, ecx
+    vmulss xmm1, xmm1, k_hud_line
+    vaddss xmm1, xmm1, k_hud_x
+    vmovss xmm2, k_hud_small
+    ret
+}
+
+; xmm0 x, xmm1 y: one cooldown pip; rcx name, edx remaining ticks, xmm3 full ticks
+hud_pip: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 72                        ; 8 + 16 + 72 = 96; xmm6, xmm7 at [rsp + 32], [rsp + 48]
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    mov rbx, rcx
+    mov esi, edx
+    vmovss xmm6, xmm0, xmm0
+    vmovss xmm7, xmm1, xmm1
+    vmovss dword ptr [rsp + 64], xmm3
+    ; label
+    vmovss xmm2, k_hud_small
+    mov rcx, rbx
+    lea rdx, col_dim
+    test esi, esi
+    jnz cooling
+        lea rdx, col_text
+    cooling:
+    call ui_text
+    ; bar: full when ready
+    vmovss xmm0, xmm6, xmm6
+    vmovss xmm1, xmm7, xmm7
+    vaddss xmm1, xmm1, k_hud_line
+    vmovss xmm2, k_hud_pip_w
+    vmovss xmm3, k_hud_pip_h
+    vcvtsi2ss xmm4, xmm4, esi
+    vdivss xmm4, xmm4, dword ptr [rsp + 64]
+    vmovss xmm5, k_ui_one
+    vsubss xmm4, xmm5, xmm4
+    lea rcx, col_cyan
+    call ui_bar
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    add rsp, 72
+    pop rsi
+    pop rbx
+    ret
+}
+
+hud_draw: proc() = {
+    push rbx
+    sub rsp, 64                        ; 8 + 8 + 64 = 80; xmm6 at [rsp + 32]
+    movaps xmmword ptr [rsp + 32], xmm6
+    ; --- performance overlay -----------------------------------------------
+    call ui_str_clear
+    invoke(ui_str_cat, "RASM ENGINE  ")
+    mov eax, pool_workers
+    lea ecx, [rax + 1]
+    call ui_str_u32
+    invoke(ui_str_cat, " THREADS")
+    xor ecx, ecx
+    call hud_line
+    lea rcx, ui_text_buf
+    lea rdx, col_cyan
+    call ui_text
+    call ui_str_clear
+    invoke(ui_str_cat, "FPS ")
+    mov ecx, stat_frame_us
+    mov eax, 1000000
+    xor edx, edx
+    test ecx, ecx
+    jz no_fps
+    div ecx
+    no_fps:
+    mov ecx, eax
+    call ui_str_u32
+    invoke(ui_str_cat, "  FRAME ")
+    mov ecx, stat_frame_us
+    call ui_str_ms
+    mov ecx, 1
+    call hud_line
+    lea rcx, ui_text_buf
+    lea rdx, col_text
+    call ui_text
+    call ui_str_clear
+    invoke(ui_str_cat, "SIM ")
+    mov ecx, stat_sim_us
+    call ui_str_ms
+    mov ecx, 2
+    call hud_line
+    lea rcx, ui_text_buf
+    lea rdx, col_text
+    call ui_text
+    call ui_str_clear
+    invoke(ui_str_cat, "ALIENS ")
+    mov ecx, sim_count
+    call ui_str_u32
+    invoke(ui_str_cat, "  VISIBLE ")
+    mov ecx, instance_counts[0]
+    add ecx, instance_counts[1]
+    add ecx, instance_counts[2]
+    call ui_str_u32
+    mov ecx, 3
+    call hud_line
+    lea rcx, ui_text_buf
+    lea rdx, col_text
+    call ui_text
+    ; --- kills, top centre ----------------------------------------------------
+    call ui_str_clear
+    invoke(ui_str_cat, "KILLS ")
+    mov ecx, kills
+    call ui_str_u32
+    vmovss xmm0, frame_cb.screen[0]
+    vmulss xmm0, xmm0, k_half
+    vaddss xmm0, xmm0, k_hud_kills_x
+    vmovss xmm1, k_hud_x
+    vmovss xmm2, k_hud_mid
+    lea rcx, ui_text_buf
+    lea rdx, col_text
+    call ui_text
+    ; --- bars, bottom left ------------------------------------------------------
+    vmovss xmm6, frame_cb.screen[1]
+    vsubss xmm6, xmm6, k_hud_100              ; y of the health bar
+    vmovss xmm0, k_hud_x
+    vmovss xmm1, xmm6, xmm6
+    vsubss xmm1, xmm1, k_hud_line
+    vmovss xmm2, k_hud_small
+    lea rcx, hud_hp_label
+    lea rdx, col_text
+    call ui_text
+    vmovss xmm0, k_hud_x
+    vmovss xmm1, xmm6, xmm6
+    vmovss xmm2, k_hud_bar_w
+    vmovss xmm3, k_hud_bar_h
+    vmovss xmm4, hero_hp
+    vdivss xmm4, xmm4, k_hud_100
+    lea rcx, col_red
+    call ui_bar
+    vmovss xmm0, k_hud_x
+    vmovss xmm1, xmm6, xmm6
+    vaddss xmm1, xmm1, k_hud_line
+    vaddss xmm1, xmm1, k_hud_line
+    vmovss xmm2, k_hud_bar_w
+    vmovss xmm3, k_hud_pip_h
+    vmovss xmm4, energy
+    vdivss xmm4, xmm4, k_hud_100
+    lea rcx, col_cyan
+    call ui_bar
+    ; cooldowns
+    vmovss xmm0, k_hud_x
+    vmovss xmm1, xmm6, xmm6
+    vaddss xmm1, xmm1, k_hud_100
+    vsubss xmm1, xmm1, k_hud_line
+    vsubss xmm1, xmm1, k_hud_line
+    vsubss xmm1, xmm1, k_hud_line
+    vmovss dword ptr [rsp + 48], xmm1
+    lea rcx, hud_dash_label
+    mov edx, dash_cd
+    vmovss xmm3, k_dash_cd
+    call hud_pip
+    vmovss xmm0, k_hud_x
+    vaddss xmm0, xmm0, k_hud_pip_w
+    vaddss xmm0, xmm0, k_hud_x
+    vmovss xmm1, dword ptr [rsp + 48]
+    lea rcx, hud_pulse_label
+    mov edx, pulse_cd
+    vmovss xmm3, k_pulse_cd
+    call hud_pip
+    vmovss xmm0, k_hud_pip_w
+    vaddss xmm0, xmm0, k_hud_x
+    vaddss xmm0, xmm0, xmm0
+    vaddss xmm0, xmm0, k_hud_x
+    vmovss xmm1, dword ptr [rsp + 48]
+    lea rcx, hud_bomb_label
+    mov edx, bomb_cd
+    vmovss xmm3, k_bomb_cd
+    call hud_pip
+    ; --- death ----------------------------------------------------------------
+    cmp hero_alive, 0
+    jne alive
+    vmovss xmm0, frame_cb.screen[0]
+    vmulss xmm0, xmm0, k_half
+    vsubss xmm0, xmm0, k_hud_dead_w
+    vmovss xmm1, frame_cb.screen[1]
+    vmulss xmm1, xmm1, k_half
+    vsubss xmm1, xmm1, k_hud_100
+    vmovss xmm2, k_hud_big
+    lea rcx, hud_dead_label
+    lea rdx, col_red
+    call ui_text
+    vmovss xmm0, frame_cb.screen[0]
+    vmulss xmm0, xmm0, k_half
+    vsubss xmm0, xmm0, k_hud_restart_w
+    vmovss xmm1, frame_cb.screen[1]
+    vmulss xmm1, xmm1, k_half
+    vsubss xmm1, xmm1, k_hud_x
+    vmovss xmm2, k_hud_mid
+    lea rcx, hud_restart_label
+    lea rdx, col_text
+    call ui_text
+alive:
+    call ui_flush
+    movaps xmm6, xmmword ptr [rsp + 32]
+    add rsp, 64
+    pop rbx
+    ret
+}
+hud_hp_label: [8]const u8 = "HEALTH"
+hud_dash_label: [8]const u8 = "DASH"
+hud_pulse_label: [8]const u8 = "PULSE"
+hud_bomb_label: [8]const u8 = "ORBITAL"
+hud_dead_label: [16]const u8 = "YOU DIED"
+hud_restart_label: [32]const u8 = "PRESS R TO FIGHT AGAIN"
+k_hud_dead_w: const f32 = 120.0          ; half of 8 glyphs * 6 * 5
+k_hud_restart_w: const f32 = 198.0       ; half of 22 glyphs * 6 * 3

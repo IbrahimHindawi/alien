@@ -31,6 +31,7 @@ FrameConstants: struct = {
     fog_color: [4]f32
     params: [4]f32
     hero_world: [16]f32
+    screen: [4]f32
 }
 
 frame_cb: FrameConstants = {
@@ -409,6 +410,9 @@ instance:
     vcall(device, ID3D11DeviceVtbl.CreateBuffer, bolt_desc&, 0, bolt_buffer&)
     test eax, eax
     js failed
+    call ui_init
+    test eax, eax
+    jz failed
     invoke(arena_reset, arena_frame&)
     mov eax, 1
     jmp done
@@ -695,6 +699,12 @@ render_frame: proc() = {
     vmovups xmmword ptr frame_cb.camera_pos, xmm0
     vmovss xmm0, render_time
     vmovss frame_cb.camera_pos[3], xmm0
+    mov eax, client_width
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss frame_cb.screen[0], xmm0
+    mov eax, client_height
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss frame_cb.screen[1], xmm0
     call render_upload_frame
 
     vcall(context, ID3D11DeviceContextVtbl.ClearRenderTargetView, backbuffer_rtv, clear_color&)
@@ -755,6 +765,7 @@ next_lod:
     mov eax, hero_mesh.index_count
     vcall(context, ID3D11DeviceContextVtbl.DrawIndexed, rax, 0, 0)
     no_hero:
+    call hud_draw
 
     cmp opt_capture, 0
     je no_capture

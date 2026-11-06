@@ -25,8 +25,11 @@ import "renderer/camera.rasm"
 import "renderer/render.rasm"
 import "renderer/fx.rasm"
 import "renderer/particles.rasm"
+import "renderer/ui_font.rasm"
+import "renderer/ui.rasm"
 import "renderer/ring_table.rasm"
 import "gameplay/hero.rasm"
+import "gameplay/hud.rasm"
 import "tests/tests.rasm"
 
 ; 768 MiB reserved and committed for the run
@@ -171,10 +174,12 @@ update_title: proc() = {
     xor edx, edx
     div rbx
     mov rsi, rax                       ; frame us
+    mov stat_frame_us, eax
     invoke(ticks_to_us, stats_sim_qpc)
     xor edx, edx
     div rbx
     mov rdi, rax                       ; sim us per frame
+    mov stat_sim_us, eax
     mov rax, stats_inst_cycles
     xor edx, edx
     div rbx
