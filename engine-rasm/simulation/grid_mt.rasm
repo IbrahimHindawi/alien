@@ -52,6 +52,9 @@ grid_fuse_now: u32 = 0                  ; this build fuses per band (the populat
 grid_windowed_ticks: u32 = 0
 grid_windowed: u32 = 0                  ; this build counts from row windows (no bin, no bucket)
 grid_count_error: u32 = 0
+k_bcast3: [8]const u32[align(32)] = { 3, 3, 3, 3, 3, 3, 3, 3 }
+k_bcast7: [8]const u32[align(32)] = { 7, 7, 7, 7, 7, 7, 7, 7 }
+k_upper_half: [8]const u32[align(32)] = { 0, 0, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF }
 grid_built_n: u32 = 0                   ; slots sorted by the last build; spawns follow them
 grid_d_rows: u32 = 0                    ; rows any entity can have moved since the last build
 k_disp_rows: const f32 = 0.5            ; a cell is 2 m
@@ -336,16 +339,32 @@ count_move:
     inc ecx
     jmp count_move
 counted_move:
-    ; inclusive prefix from the band's base
+    ; inclusive prefix from the band's base, 8 counters per step: within
+    ; each 128-bit half by shifts, the low half's last into the high half,
+    ; then the running total; the last becomes the next running total
     lea rdi, [rsi + r9*4 + 4]
-    mov edx, r12d
+    vmovd xmm1, r12d
+    vpbroadcastd ymm1, xmm1
+    vmovdqa ymm4, ymmword ptr k_bcast7
+    vmovdqa ymm5, ymmword ptr k_bcast3
+    vmovdqa ymm3, ymmword ptr k_upper_half
     xor eax, eax
 prefix:
-    add edx, dword ptr [rdi + rax*4]
-    mov dword ptr [rdi + rax*4], edx
-    inc eax
+    vmovdqu ymm0, ymmword ptr [rdi + rax*4]
+    vpslldq ymm2, ymm0, 4
+    vpaddd ymm0, ymm0, ymm2
+    vpslldq ymm2, ymm0, 8
+    vpaddd ymm0, ymm0, ymm2
+    vpermd ymm2, ymm5, ymm0
+    vpand ymm2, ymm2, ymm3
+    vpaddd ymm0, ymm0, ymm2
+    vpaddd ymm0, ymm0, ymm1
+    vmovdqu ymmword ptr [rdi + rax*4], ymm0
+    vpermd ymm1, ymm4, ymm0
+    add eax, 8
     cmp eax, BAND_CELLS
     jb prefix
+    vzeroupper
     ; stayers, descending: they end each cell's run, in (cell, seq) order
     mov r11, sim_slot_id
     mov r14, sim_slot_cell2
