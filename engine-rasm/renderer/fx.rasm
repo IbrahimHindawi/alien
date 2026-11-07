@@ -141,7 +141,8 @@ no_pulse:
     vcall(context, ID3D11DeviceContextVtbl.Unmap, fx_red_buffer, 0)
 red_done:
     ; draw
-    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_unit, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, input_layout)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_bolt, 0, 0)
     mov eax, bolt_count
     test eax, eax
     jz cyan_done

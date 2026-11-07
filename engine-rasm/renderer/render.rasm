@@ -32,11 +32,17 @@ FrameConstants: struct = {
     params: [4]f32
     hero_world: [16]f32
     screen: [4]f32
+    fx_pulse: [4]f32
+    fx_bomb: [4]f32
+    cam_x: [4]f32
+    cam_y: [4]f32
+    cam_z: [4]f32
+    game: [4]f32
 }
 
 frame_cb: FrameConstants = {
     .light_dir = { -0.4777, 0.7961, -0.3715, 1.0 },
-    .fog_color = { 0.012, 0.014, 0.028, 0.0035 },
+    .fog_color = { 0.060, 0.050, 0.120, 0.0032 },
     .params = { 1.5, 0.0, 1.0, 0.0 },
 }
 
@@ -97,6 +103,31 @@ bolt_desc: D3D11_BUFFER_DESC = {
     .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
     .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
 }
+; blob shadows: the alien instance stream alone, in slot 0
+shadow_layout_desc: [1]const D3D11_INPUT_ELEMENT_DESC = {
+    { .SemanticName = "INSTANCE", .Format = DXGI_FORMAT.DXGI_FORMAT_R32G32B32A32_FLOAT,
+      .InputSlotClass = D3D11_INPUT_CLASSIFICATION.D3D11_INPUT_PER_INSTANCE_DATA, .InstanceDataStepRate = 1 },
+}
+; shadows multiply what is under them: dest * (1 - alpha)
+shadow_blend_desc: D3D11_BLEND_DESC = {
+    .RenderTarget = {
+        {
+            .BlendEnable = 1,
+            .SrcBlend = D3D11_BLEND.D3D11_BLEND_ZERO,
+            .DestBlend = D3D11_BLEND.D3D11_BLEND_INV_SRC_ALPHA,
+            .BlendOp = D3D11_BLEND_OP.D3D11_BLEND_OP_ADD,
+            .SrcBlendAlpha = D3D11_BLEND.D3D11_BLEND_ZERO,
+            .DestBlendAlpha = D3D11_BLEND.D3D11_BLEND_ONE,
+            .BlendOpAlpha = D3D11_BLEND_OP.D3D11_BLEND_OP_ADD,
+            .RenderTargetWriteMask = 15,
+        },
+    },
+}
+shadow_depth_desc: D3D11_DEPTH_STENCIL_DESC = {
+    .DepthEnable = 1,
+    .DepthWriteMask = D3D11_DEPTH_WRITE_MASK.D3D11_DEPTH_WRITE_MASK_ZERO,
+    .DepthFunc = D3D11_COMPARISON_FUNC.D3D11_COMPARISON_LESS_EQUAL,
+}
 mesh_buffer_desc: D3D11_BUFFER_DESC = { .Usage = D3D11_USAGE.D3D11_USAGE_IMMUTABLE }
 mesh_init: D3D11_SUBRESOURCE_DATA = {}
 
@@ -122,6 +153,19 @@ raster_state: *ID3D11RasterizerState = {}
 depth_state: *ID3D11DepthStencilState = {}
 frame_buffer: *ID3D11Buffer = {}
 input_layout: *ID3D11InputLayout = {}
+shadow_layout: *ID3D11InputLayout = {}
+shadow_blend: *ID3D11BlendState = {}
+shadow_depth: *ID3D11DepthStencilState = {}
+vs_bolt: *ID3D11VertexShader = {}
+vs_sky: *ID3D11VertexShader = {}
+ps_sky: *ID3D11PixelShader = {}
+vs_shadow: *ID3D11VertexShader = {}
+ps_shadow: *ID3D11PixelShader = {}
+bomb_flash: f32 = 0.0
+bomb_was_timing: u32 = 0
+k_bomb_flash_decay: const f32 = 0.035
+k_hp_full: const f32 = 0.01
+k_bomb_delay_inv: const f32 = 0.02
 vs_unit: *ID3D11VertexShader = {}
 ps_unit: *ID3D11PixelShader = {}
 vs_ground: *ID3D11VertexShader = {}
@@ -365,6 +409,36 @@ instance:
     js failed
     invoke(load_shader_bytes, "shaders\\ground_ps.cso")
     vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_ground&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\bolt_vs.cso")
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rax, render_shader_size, 0, vs_bolt&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\shadow_vs.cso")
+    mov rbx, rax
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rbx, render_shader_size, 0, vs_shadow&)
+    test eax, eax
+    js failed
+    vcall(device, ID3D11DeviceVtbl.CreateInputLayout, shadow_layout_desc&, 1, rbx, render_shader_size, shadow_layout&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\shadow_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_shadow&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\sky_vs.cso")
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rax, render_shader_size, 0, vs_sky&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\sky_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_sky&)
+    test eax, eax
+    js failed
+    vcall(device, ID3D11DeviceVtbl.CreateBlendState, shadow_blend_desc&, shadow_blend&)
+    test eax, eax
+    js failed
+    vcall(device, ID3D11DeviceVtbl.CreateDepthStencilState, shadow_depth_desc&, shadow_depth&)
     test eax, eax
     js failed
     invoke(load_shader_bytes, "shaders\\hero_vs.cso")
@@ -705,6 +779,7 @@ render_frame: proc() = {
     mov eax, client_height
     vcvtsi2ss xmm0, xmm0, eax
     vmovss frame_cb.screen[1], xmm0
+    call render_fill_effects
     call render_upload_frame
 
     vcall(context, ID3D11DeviceContextVtbl.ClearRenderTargetView, backbuffer_rtv, clear_color&)
@@ -716,6 +791,16 @@ render_frame: proc() = {
     vcall(context, ID3D11DeviceContextVtbl.RSSetState, raster_state)
     vcall(context, ID3D11DeviceContextVtbl.VSSetConstantBuffers, 0, 1, frame_buffer&)
     vcall(context, ID3D11DeviceContextVtbl.PSSetConstantBuffers, 0, 1, frame_buffer&)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetBlendState, 0, 0, 0xFFFFFFFF)
+
+    ; sky: one triangle, no depth
+    vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, ui_depth, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetPrimitiveTopology, D3D11_PRIMITIVE_TOPOLOGY.D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_sky, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_sky, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.Draw, 3, 0)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, depth_state, 0)
 
     ; ground
     vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, 0)
@@ -723,6 +808,31 @@ render_frame: proc() = {
     vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_ground, 0, 0)
     vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_ground, 0, 0)
     vcall(context, ID3D11DeviceContextVtbl.Draw, 6, 0)
+
+    ; blob shadows: every visible alien, all LODs, before the aliens themselves
+    vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, shadow_layout)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_shadow, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_shadow, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetBlendState, shadow_blend, 0, 0xFFFFFFFF)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, shadow_depth, 0)
+    xor ebx, ebx
+shadow:
+    lea rax, instance_counts
+    mov eax, dword ptr [rax + rbx*4]
+    test eax, eax
+    jz next_shadow
+    lea rax, instance_buffers
+    lea rax, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, rax, instance_stride&, instance_offset&)
+    lea rax, instance_counts
+    mov r8d, dword ptr [rax + rbx*4]   ; r8 itself: vcall fills rdx before r8
+    vcall(context, ID3D11DeviceContextVtbl.DrawInstanced, 6, r8, 0, 0)
+next_shadow:
+    inc ebx
+    cmp ebx, LOD_COUNT
+    jb shadow
+    vcall(context, ID3D11DeviceContextVtbl.OMSetBlendState, 0, 0, 0xFFFFFFFF)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, depth_state, 0)
 
     ; units: one instanced draw per LOD
     vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, input_layout)
@@ -798,6 +908,66 @@ next_lod:
     add rsp, 72
     pop rsi
     pop rbx
+    ret
+}
+
+; Effect state for the shaders: pulse, strike, camera basis, game.
+render_fill_effects: proc() = {
+    ; pulse: centre, radius, running
+    vmovss xmm0, pulse_cx
+    vmovss frame_cb.fx_pulse[0], xmm0
+    vmovss xmm0, pulse_cz
+    vmovss frame_cb.fx_pulse[1], xmm0
+    vmovss xmm0, pulse_r
+    vmovss frame_cb.fx_pulse[2], xmm0
+    mov eax, pulse_on
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss frame_cb.fx_pulse[3], xmm0
+    ; strike: point, telegraph 1 -> 0 while the timer runs, then a decaying flash
+    vmovss xmm0, bomb_x
+    vmovss frame_cb.fx_bomb[0], xmm0
+    vmovss xmm0, bomb_z
+    vmovss frame_cb.fx_bomb[1], xmm0
+    mov eax, bomb_timer
+    vcvtsi2ss xmm0, xmm0, eax
+    vmulss xmm0, xmm0, k_bomb_delay_inv
+    vmovss frame_cb.fx_bomb[2], xmm0
+    vmovss xmm1, bomb_flash
+    vsubss xmm1, xmm1, k_bomb_flash_decay
+    vxorps xmm2, xmm2, xmm2
+    vmaxss xmm1, xmm1, xmm2
+    mov eax, bomb_timer
+    test eax, eax
+    jnz timing
+    cmp bomb_was_timing, 0
+    je timing
+        vmovss xmm1, k_one[0]          ; the strike landed since the last frame
+    timing:
+    mov bomb_was_timing, eax
+    vmovss bomb_flash, xmm1
+    vmovss frame_cb.fx_bomb[3], xmm1
+    ; camera basis, scaled for the sky's rays
+    vmovss xmm3, cam_tan
+    vmulss xmm4, xmm3, cam_aspect
+    vbroadcastss xmm4, xmm4
+    vbroadcastss xmm3, xmm3
+    lea rax, cam_view
+    vmulps xmm0, xmm4, xmmword ptr [rax + 64]
+    vmovups xmmword ptr frame_cb.cam_x, xmm0
+    vmulps xmm0, xmm3, xmmword ptr [rax + 80]
+    vmovups xmmword ptr frame_cb.cam_y, xmm0
+    vmovaps xmm0, xmmword ptr [rax + 96]
+    vmovups xmmword ptr frame_cb.cam_z, xmm0
+    ; game: alive, hp fraction, level-up flash, beam
+    mov eax, hero_alive
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss frame_cb.game[0], xmm0
+    vmovss xmm0, hero_hp
+    vmulss xmm0, xmm0, k_hp_full
+    vmovss frame_cb.game[1], xmm0
+    mov eax, beam_on
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss frame_cb.game[3], xmm0
     ret
 }
 
