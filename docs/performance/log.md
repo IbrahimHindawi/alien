@@ -87,3 +87,35 @@ counters). The banded grid is 4.7x slower than `sim_grid` on one thread, so
 the single-threaded path keeps `sim_grid`. **Kept.** Next: the grid's
 per-band rereads (bin by band once, then sort within bands), and threaded
 culling.
+
+## 2026-11-07: the grid binned by band (kept)
+
+- **Hypothesis**: the banded grid's cost at 16 threads is its rereads: each
+  of 32 band jobs streamed all 1M entity cells twice (count, scatter), 256 MB
+  of traffic per tick, and a dense crowd occupied only ~10 of the 32 bands.
+- **Change** (`grid_mt.rasm`): bin once, then sort each band alone. Entity
+  chunks compute cells and a histogram of bands; an exclusive prefix (band
+  major, chunk minor) places each chunk's run of each band; chunks bucket
+  their ids by band (ascending); then one job per band does a counting sort of
+  its ids over its own counters (8 rows, 8192 cells: 32 KB, L1). 128 bands of
+  8 rows keep dense crowds spread over all threads.
+- **Correctness**: the order within every cell is the stable ascending one, so
+  the sorted arrays equal `sim_grid`'s; the self test and all reference hashes
+  pass at 1 and 16 threads, and the contest's recorded 1M hashes match.
+
+| scenario (16 threads) | before us/tick | after |
+|---|---|---|
+| 100k sparse | 724 | 541 |
+| 1M sparse | 5761 | 3837 |
+
+Grid at 1M, 16 threads: 12.3 -> 5.2 cycles/entity. **Kept.**
+
+## 2026-11-07: separation over 2x2 cells (discarded)
+
+- **Idea**: a cell is 2 m and the radius 1 m, so only the 2x2 cells on the
+  entity's side of its cell centre can hold a hit; exact (no hit is skipped,
+  order and the 16 cap unchanged; all hashes passed).
+- **Measured** A/B, back to back, one thread: 100k sparse separation 36.2 ->
+  47.0 cycles/entity (worse even branch-free), 1M dense 292 -> 298 (dense
+  crowds reach the 16-neighbour cap early; the extra cells were not the cost).
+  **Discarded.**

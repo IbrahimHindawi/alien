@@ -126,6 +126,10 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_hp, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_band_ids, rax
     mov eax, 1
     jmp done
 failed:
@@ -673,7 +677,7 @@ sim_step: proc(keys: u32) = {
     mov rbx, rax
     cmp pool_workers, 0
     je grid_alone
-        call sim_grid_mt               ; banded: every band streams all cells, worth it only in parallel
+        call sim_grid_mt               ; binned by band, then a counting sort per band
         jmp grid_done
     grid_alone:
         call sim_grid
