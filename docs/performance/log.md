@@ -408,3 +408,14 @@ the rest negligible) led to:
   written once, in order: no slot ids, no order repair, no gather.
 - **Correctness**: every reference and recorded hash at 1 and 16 threads; a
   guard-page run.
+
+## 2026-11-07: the merge packs stayers in pieces (kept)
+
+The block merge built the 8 stayers' keys (cell << 32 | seq) as two vectors
+of 64-bit keys; each step packs every stayer whose key comes before the next
+mover's (`vpcmpgtq`; keys are positive, so the signed compare holds; the
+no-mover sentinel is the largest signed key: a first version used -1, which
+is the smallest signed key, and hung), then emits the movers before the next
+stayer. One thread, 1M: 10.66 -> 10.31 ms. At 16 threads the machine was
+loaded during the measurement (the C rival itself measured 916-997 us instead
+of 733); under that load the new and previous builds were within noise.
