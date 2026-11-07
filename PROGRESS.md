@@ -26,13 +26,13 @@ reports with a stack scan (`python tools/symbolize.py <rva>`),
 | 3 swarm simulation | done: grid counting sort, capped separation, pursuit; bit-exact with the Python model at any thread count |
 | 4 playable hero | done: WASD, mouse aim, automatic piercing weapon, damage, death, restart, escalating runs, top-down and third-person cameras (V), HUD. Camera obstruction waits for obstacles |
 | 5 cybernetic aliens | assets done (Tripo, reviewed, 3 LODs, halved budgets, 6 in-place baked clips); only scuttlers are simulated; baked clips not yet played (VAT) |
-| 6 combat spectacle | mostly: dash (invulnerable), expanding gravity pulse, energy beam, orbital bombardment, death shards. Missing: upgrades and progression |
-| 7 optimisation | in progress: separation 2.7x, threads 2.8x more (docs/performance/log.md) |
-| 8 polish | started: HUD and performance overlay. Missing: ground/sky look, audio, menus, settings, saves |
+| 6 combat spectacle | done: dash, gravity pulse, beam, orbital strike, death shards, camera shake, hit flash; progression: XP gems, levels, a pick of three from twelve upgrades, aliens toughen every 90 s, the swarm snowballs (quadratic). Balance needs real play |
+| 7 optimisation | in progress: 1M tick on 16 threads 14.5 -> 3.6 ms (binned grid, parallel AVX2 compaction; docs/performance/log.md). Contest round 1 lost to clang-compiled C by 1.4-4.9x: the C engine's design is better (docs/performance/contest.md); round 2 ports its ideas |
+| 8 polish | started: HDR, bloom, ACES, sky, basalt ground with glowing veins (the ground was never drawn before: culled), blob shadows, hero lamp and ring, pulse and strike on the ground, HUD with XP bar, level, timer and GPU time. Missing: audio, menus, settings, saves |
 
 Controls: WASD move, mouse aim (fire is automatic), Space dash, right mouse
 or Q gravity pulse, hold E beam, F orbital strike, V camera, wheel zoom, R
-restart, Esc quit. `--autoplay` plays the bench input schedule.
+restart, Esc quit; on level up 1, 2, 3 or a click picks an upgrade. `--autoplay` plays the bench input schedule.
 
 Commercial release gates: none passed. Gate 1 (fun prototype) needs the
 abilities and real playtesting; nothing here has been played by anyone
