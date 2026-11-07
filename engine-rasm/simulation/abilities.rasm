@@ -494,6 +494,29 @@ block:
         vaddps ymm6, ymm3, ymm6
         vblendvps ymm3, ymm3, ymm6, ymm9
     no_bomb:
+    ; the lanes this block killed (hp was > 0, is now <= 0) go to the dead list
+    vxorps xmm5, xmm5, xmm5
+    vcmpps ymm6, ymm4, ymm5, 18                    ; new hp <= 0 (LE_OQ)
+    vmovups ymm7, ymmword ptr [rsi + rax*4]        ; the hp before (not stored yet)
+    vcmpps ymm7, ymm7, ymm5, 30                    ; > 0
+    vandps ymm6, ymm6, ymm7
+    vmovmskps ecx, ymm6
+    mov edx, edi
+    sub edx, eax
+    cmp edx, 8
+    jae killed_full
+        bzhi ecx, ecx, edx
+    killed_full:
+    test ecx, ecx
+    jz killed_none
+killed:
+    tzcnt edx, ecx
+    blsr ecx, ecx
+    add edx, eax
+    call dead_push
+    test ecx, ecx
+    jnz killed
+killed_none:
     ; a block past the range's end writes only its own lanes: the next range
     ; may belong to another thread
     mov ecx, edi

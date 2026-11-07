@@ -436,3 +436,14 @@ of 733); under that load the new and previous builds were within noise.
 |---|---:|---:|---:|---:|---:|---:|
 | now | 1037 | 123 | 9493 | 1006 | 26433 | 2671 |
 | C rival (same session) | 1016 | 110 | 9256 | 741 | 22830 | 1919 |
+
+## 2026-11-07: deaths recorded where they happen (kept)
+
+A hit that takes hp from > 0 to <= 0 appends the slot to a dead list:
+projectiles serially, the beam and the bomb (area job, parallel) with an
+atomic. The deaths step processes the list (event, no cell, out of the next
+build's counts) instead of a parallel scan of every hp and its barrier.
+Kills and state are unchanged; only the order of death events (presentation)
+can differ. Interleaved A/B on a loaded machine (the rival itself measured
+874-977 us at 1M): 1M 16 threads 1324/1387/1366 -> 1196/1227/1294 us, 100k
+150/123 -> 131/113 us. **Kept.**

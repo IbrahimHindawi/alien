@@ -143,59 +143,77 @@ done:
     ret
 }
 
-; Count the dead and the living, emit the death events.
+; The dead of this tick: every hit that took an entity's hp from > 0 to <= 0
+; appended its slot to dead_list (projectiles serially, the area effects with
+; an atomic), so nobody scans the population for them. For each: a death
+; event, no cell for the next build, out of the next build's counts.
+dead_list: *u32 = 0                    ; MAX_ENTITIES, allocated by sim_alloc
+dead_n: u32 = 0
+
+; edx: a slot that just died. Preserves everything but flags.
+dead_push: proc() = {
+    push rax
+    push rcx
+    mov eax, 1
+    lock xadd dead_n, eax
+    mov rcx, dead_list
+    mov dword ptr [rcx + rax*4], edx
+    pop rcx
+    pop rax
+    ret
+}
+
 sim_deaths_mt: proc() = {
     push rbx
     push rsi
     push rdi
-    sub rsp, 32                        ; 8 + 24 + 32 = 64
-    mov rcx, compact_count_job&
-    mov edx, sim_count
-    mov r8d, CMP_CHUNK
-    call pool_dispatch
-    mov eax, sim_count
-    add eax, CMP_CHUNK - 1
-    shr eax, CMP_SHIFT
-    mov edi, eax                       ; chunks
-    xor ebx, ebx                       ; living
-    xor esi, esi                       ; dead
-    xor ecx, ecx
-    lea r8, cmp_alive
-    lea r10, cmp_doff
-prefix:
-    cmp ecx, edi
-    jae prefixed
-    mov dword ptr [r10 + rcx*4], esi
-    mov eax, ecx
-    shl eax, CMP_SHIFT
-    mov edx, sim_count
-    sub edx, eax
-    mov eax, CMP_CHUNK
-    cmp edx, eax
-    cmova edx, eax                     ; the chunk's length
-    mov eax, dword ptr [r8 + rcx*4]
-    add ebx, eax
-    sub edx, eax
-    add esi, edx
-    inc ecx
-    jmp prefix
-prefixed:
-    mov sim_alive, ebx
+    sub rsp, 32
+    mov esi, dead_n
     test esi, esi
     jz done
-    mov eax, death_count
-    mov cmp_death_base, eax
-    mov rcx, death_events_job&
-    mov edx, sim_count
-    mov r8d, CMP_CHUNK
-    call pool_dispatch
+    mov ebx, death_count
+    xor edi, edi
+dead:
+    mov r8, dead_list
+    mov eax, dword ptr [r8 + rdi*4]    ; slot
+    lea ecx, [rbx + rdi]
+    cmp ecx, DEATH_EVENTS_MAX
+    jae no_event
+    mov r9, sim_pos_x
+    mov edx, dword ptr [r9 + rax*4]
+    lea r9, death_x
+    mov dword ptr [r9 + rcx*4], edx
+    mov r9, sim_pos_z
+    mov edx, dword ptr [r9 + rax*4]
+    lea r9, death_z
+    mov dword ptr [r9 + rcx*4], edx
+no_event:
+    mov r9, sim_cell
+    mov edx, dword ptr [r9 + rax*4]
+    cmp edx, -1
+    je counted
+    mov dword ptr [r9 + rax*4], -1
+    mov ecx, edx
+    shr ecx, BAND_SHIFT
+    lea r10, next_band_total
+    dec dword ptr [r10 + rcx*4]
+    mov r9, sim_slot_cell
+    cmp edx, dword ptr [r9 + rax*4]
+    je counted
+    lea r10, next_mov_total
+    dec dword ptr [r10 + rcx*4]
+counted:
+    inc edi
+    cmp edi, esi
+    jb dead
     add kills, esi
-    mov eax, death_count
-    add eax, esi
+    sub sim_alive, esi
+    lea eax, [rbx + rsi]
     mov ecx, DEATH_EVENTS_MAX
     cmp eax, ecx
     cmova eax, ecx
     mov death_count, eax
+    mov dead_n, 0
 done:
     add rsp, 32
     pop rdi

@@ -275,6 +275,11 @@ candidate:
     jae skip
     vsubss xmm4, xmm4, g_damage                    ; hp - damage
     vmovss dword ptr [rsi + rdi*4], xmm4
+    vcomiss xmm4, k_zero
+    ja hit_alive
+    mov edx, edi
+    call dead_push                                 ; killed: to the dead list
+hit_alive:
     lea rax, proj_pierce
     dec dword ptr [rax + rbx*4]
     jz next_half                                   ; pierce spent
