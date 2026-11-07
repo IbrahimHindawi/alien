@@ -22,6 +22,9 @@ pool_total: u32 = 0
 pool_chunk: u32 = 0
 pool_chunks: u32 = 0
 pool_next: [16]u32[align(64)] = {}     ; [0]: next chunk; own cache line
+pool_parts: u32 = 1                    ; participants: the workers and the main thread
+pool_cursor: [1024]u32[align(64)] = {} ; per participant (16 apart): its slice's next chunk
+pool_slice_end: [64]u32 = {}           ; per participant: one past its slice's last chunk
 pool_done: [16]u32[align(64)] = {}     ; [0]: workers finished; own cache line
 pool_handles: [MAX_WORKERS]u64 = {}
 pool_sysinfo: SYSTEM_INFO = {}
@@ -64,6 +67,7 @@ pool_worker: proc(param: *void) -> u32 = {
     push rbx
     push rsi
     sub rsp, 40                        ; 8 + 16 + 40 = 64; [rsp + 32]: the generation seen
+    mov ebx, ecx                       ; this worker's index (the thread parameter)
     ; generation 0: workers exist before the first dispatch, so a worker that
     ; starts late still sees that first job as new (reading pool_gen here
     ; would race with it and hang the dispatcher)
@@ -86,6 +90,7 @@ go:
     mov dword ptr [rsp + 32], eax
     cmp pool_quit, 0
     jne quit
+    mov ecx, ebx                       ; this worker's index
     call pool_run_chunks
     lea rax, pool_done
     lock inc dword ptr [rax]
@@ -98,16 +103,31 @@ quit:
     ret
 }
 
-; Take chunks until none are left. Preserves nothing but the ABI's nonvolatiles.
-pool_run_chunks: proc() = {
+; ecx: this participant (a worker's index, or pool_workers for the main
+; thread). Each participant owns a contiguous slice of the job's chunks and
+; takes from it first, then steals from the other slices in turn. A job's
+; chunk i goes to the same participant every time the same job is
+; dispatched, so a band built by one core this tick is built (and its data
+; found in that core's caches) by the same core next tick; stealing keeps
+; the load even. Results never depend on who ran which chunk.
+pool_run_chunks: proc(part: u32) = {
     push rbx
-    sub rsp, 32
-again:
-    lea rax, pool_next
+    push rsi
+    push rdi
+    push r12
+    sub rsp, 40                        ; 8 + 32 + 40 = 80
+    mov esi, ecx                       ; own slice
+    mov edi, ecx                       ; the slice taken from
+    mov r12d, pool_parts
+take:
+    mov eax, edi
+    shl eax, 6                         ; a cursor per cache line
+    lea rdx, pool_cursor
     mov ecx, 1
-    lock xadd dword ptr [rax], ecx     ; ecx: this chunk's index
-    cmp ecx, pool_chunks
-    jae done
+    lock xadd dword ptr [rdx + rax], ecx
+    lea rdx, pool_slice_end
+    cmp ecx, dword ptr [rdx + rdi*4]
+    jae next_slice
     mov r8d, ecx                       ; chunk index
     mov eax, ecx
     imul eax, pool_chunk
@@ -118,9 +138,19 @@ again:
     mov edx, eax                       ; end
     mov rbx, pool_job
     call rbx
-    jmp again
-done:
-    add rsp, 32
+    jmp take
+next_slice:
+    inc edi
+    cmp edi, r12d
+    jb wrapped
+    xor edi, edi
+wrapped:
+    cmp edi, esi
+    jne take
+    add rsp, 40
+    pop r12
+    pop rdi
+    pop rsi
     pop rbx
     ret
 }
@@ -135,8 +165,29 @@ pool_dispatch: proc(job: u64, total: u32, chunk: u32) = {
     xor edx, edx
     div r8d
     mov pool_chunks, eax
-    lea rax, pool_next
-    mov dword ptr [rax], 0
+    ; the slices: participant p owns chunks [p * C / T, (p + 1) * C / T)
+    mov r9d, pool_workers
+    inc r9d                            ; T
+    mov pool_parts, r9d
+    xor r10d, r10d                     ; p
+slices:
+    mov eax, r10d
+    imul eax, pool_chunks
+    xor edx, edx
+    div r9d
+    mov r11d, r10d
+    shl r11d, 6
+    lea rcx, pool_cursor
+    mov dword ptr [rcx + r11], eax
+    lea eax, [r10 + 1]
+    imul eax, pool_chunks
+    xor edx, edx
+    div r9d
+    lea rcx, pool_slice_end
+    mov dword ptr [rcx + r10*4], eax
+    inc r10d
+    cmp r10d, r9d
+    jb slices
     lea rax, pool_done
     mov dword ptr [rax], 0
     cmp pool_workers, 0
@@ -144,6 +195,7 @@ pool_dispatch: proc(job: u64, total: u32, chunk: u32) = {
     lock inc pool_gen                  ; publishes the job fields (x86 stores are ordered)
     invoke(WakeByAddressAll, pool_gen&)
 alone:
+    mov ecx, pool_workers              ; the main thread is the last participant
     call pool_run_chunks
     mov ecx, pool_workers
 wait:

@@ -71,6 +71,9 @@ adds on top of the same design.
 | the dead left to the next build | 1282 | 357 | 15639 | 2481 | 41504 | 3928 |
 | incremental rebuild | 1391 | 375 | 14880 | 2390 | 42030 | 3974 |
 | fused band pass (adaptive) | 1492 | 365 | 15511 | 2419 | 41195 | 4074 |
+| dead left to the build, incremental rebuild, windowed sweep, area by region, cells from integration | 1575 | 293 | 16039 | 1896 | 42215 | 3732 |
+| separation fast path (no self test, lazy cap) | 1366 | 286 | 13498 | 1768 | 33070 | 3024 |
+| AVX2 band prefix, chunk affinity in the pool | 1394 | 168 | 13444 | 1330 | 32204 | 3520 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
 
 All six ideas are now in the assembly engine, each exact (every hash

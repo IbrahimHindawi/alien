@@ -322,3 +322,25 @@ and bucket passes.
   everywhere (1T dense 33.1 -> 35.3 ms, 100k 1366 -> 1629 us, 16T 1M 1768 ->
   1844): the spills and two tails per group cost more than the shared
   broadcasts saved, and in crowds one capped lane sends all 16 to the exact path.
+
+## 2026-11-07: chunk affinity in the pool (kept, large)
+
+- **Hypothesis**: past 8 threads the tick stopped scaling (1T 13.0 ms, 8T
+  2.64, 16T 2.07). Chunks came from one shared counter, so a band landed on a
+  random core every tick (often across the CCDs) and its data, written last
+  tick by another core, had to travel.
+- **Change** (`threads.rasm`): each participant owns a contiguous slice of a
+  job's chunks (its own cursor on its own cache line) and steals from the
+  other slices in turn when its own is empty. The same band goes to the same
+  core every tick, so the data it wrote last tick is in that core's caches.
+  Generic: no pinning, no topology, no CPU detection; stealing keeps the load
+  even. Results never depend on who ran which chunk.
+- **Correctness**: every hash at 1 and 16 threads.
+
+| 16 threads | before us/tick | after |
+|---|---:|---:|
+| 100k sparse | 283 | 168 |
+| 1M sparse | 1752 | 1330 |
+| 1M dense | ~3500 | 3520 |
+
+**Kept.**
