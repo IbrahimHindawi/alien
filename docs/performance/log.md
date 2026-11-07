@@ -359,3 +359,10 @@ and bucket passes.
   has ~3 lanes of 8, and the gathers cost more than the smaller window saves.
   Profile that led there: dense separation is all fast-path candidates
   (~15M evaluations per tick, ~121 per group of 8), almost none exact.
+
+## 2026-11-07: candidates four per step (discarded)
+
+Four candidates per loop step, the ones past a run's end redirected (cmov) to
+a sentinel slot 1e9 m away in the columns' padding. Exact, but neutral in
+every cell (e.g. 1M 1T 12205 -> 12364 us, 16T 1345 -> 1339): the row-exit
+mispredictions it removes are not where the time is. **Discarded.**
