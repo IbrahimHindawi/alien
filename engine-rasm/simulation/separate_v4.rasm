@@ -23,6 +23,7 @@ fz_slot_cell: *u32 = 0                 ; the slots' cells as of this build (the 
 next_band_total: [128]u32 = {}         ; the next build's members and movers per band
 next_mov_total: [128]u32 = {}
 grid_maxdisp: u32 = 0                  ; the largest |move| on one axis this tick (f32 bits, >= 0)
+k_sep_cap17: [8]const u32[align(32)] = { 17, 17, 17, 17, 17, 17, 17, 17 }
 k_abs: [8]const u32[align(32)] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF }
 
 ; ecx: first sorted slot, edx: one past the last (a pool job)
@@ -52,6 +53,7 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     mov r15, sim_cell_start
     mov ebx, edx                       ; end
     mov esi, ecx                       ; s: the group's first slot
+    mov dword ptr [rsp + 232], 0       ; groups start fast
     vxorps xmm0, xmm0, xmm0
     vmovups ymmword ptr [rsp + 240], ymm0
     lea rax, [rsp + 288]
@@ -108,10 +110,63 @@ group:
     cmova ebp, eax                     ; hi column
     vmovd edi, xmm6
     dec edi                            ; first row
-    mov r9d, 3
+    mov dword ptr [rsp + 236], edi
     vxorps ymm2, ymm2, ymm2            ; sx
     vxorps ymm3, ymm3, ymm3            ; sz
     vpxor ymm4, ymm4, ymm4             ; hits per lane
+    cmp dword ptr [rsp + 232], 0
+    jne exact                          ; the last group reached the cap: go exact
+    ; fast: no self test, no cap, no lane mask. A lane meets itself once, adding
+    ; +0.0f (dx = dz = 0) and one hit; lanes past the group are never stored.
+    mov r9d, 3
+fast_row:
+    cmp edi, GRID_DIM
+    jae fast_next_row
+    mov ecx, edi
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov r8d, dword ptr [r15 + rcx*4]
+    mov r10d, dword ptr [r15 + rdx*4]
+    cmp r8d, r10d
+    jae fast_next_row
+fast_candidate:
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6                        ; dx = px - x
+    vsubps ymm9, ymm1, ymm7                        ; dz
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11                     ; d2
+    vcmpps ymm11, ymm10, ymm14, 17                 ; d2 < 1
+    vsubps ymm10, ymm14, ymm10                     ; w = 1 - d2
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vandps ymm8, ymm8, ymm11
+    vandps ymm9, ymm9, ymm11
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    inc r8d
+    cmp r8d, r10d
+    jb fast_candidate
+fast_next_row:
+    inc edi
+    dec r9d
+    jnz fast_row
+    ; any lane over the cap (hits - itself > 16)? then redo the group exactly
+    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap17
+    vpand ymm6, ymm6, ymm5
+    vmovmskps eax, ymm6
+    test eax, eax
+    jz separated
+    mov dword ptr [rsp + 232], 1
+    mov edi, dword ptr [rsp + 236]
+    vxorps ymm2, ymm2, ymm2
+    vxorps ymm3, ymm3, ymm3
+    vpxor ymm4, ymm4, ymm4
+exact:
+    mov r9d, 3
 row:
     cmp edi, GRID_DIM
     jae next_row
@@ -153,6 +208,14 @@ next_row:
     inc edi
     dec r9d
     jnz row
+    ; keep going exact while groups reach the cap
+    vpcmpeqd ymm6, ymm4, ymm15
+    vpand ymm6, ymm6, ymm5
+    vmovmskps eax, ymm6
+    test eax, eax
+    jnz separated
+    mov dword ptr [rsp + 232], 0
+separated:
     ; integrate the group's own entities now (spec 4.4, the operations of
     ; sim_integrate in the same order): positions to the spare columns, as
     ; other groups still read this tick's start positions; velocities in place
