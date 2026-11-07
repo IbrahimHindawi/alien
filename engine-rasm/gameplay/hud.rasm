@@ -115,6 +115,9 @@ hud_draw: proc() = {
     invoke(ui_str_cat, "SIM ")
     mov ecx, stat_sim_us
     call ui_str_ms
+    invoke(ui_str_cat, "  GPU ")
+    mov ecx, stat_gpu_us
+    call ui_str_ms
     mov ecx, 2
     call hud_line
     lea rcx, ui_text_buf

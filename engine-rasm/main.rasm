@@ -24,6 +24,7 @@ import "renderer/math.rasm"
 import "renderer/camera.rasm"
 import "renderer/render.rasm"
 import "renderer/post.rasm"
+import "renderer/gpu_timer.rasm"
 import "renderer/fx.rasm"
 import "renderer/particles.rasm"
 import "renderer/ui_font.rasm"
@@ -32,6 +33,7 @@ import "renderer/ring_table.rasm"
 import "gameplay/hero.rasm"
 import "gameplay/hud.rasm"
 import "gameplay/progress.rasm"
+import "gameplay/juice.rasm"
 import "tests/tests.rasm"
 
 ; 768 MiB reserved and committed for the run
@@ -182,6 +184,7 @@ update_title: proc() = {
     div rbx
     mov rdi, rax                       ; sim us per frame
     mov stat_sim_us, eax
+    call gpu_timer_average
     mov rax, stats_inst_cycles
     xor edx, edx
     div rbx
@@ -400,6 +403,7 @@ simulated:
     call clock_ticks
     sub rax, rdi
     add stats_sim_qpc, rax
+    call juice_frame
     call camera_update
     call hero_update_matrix
     call game_frame

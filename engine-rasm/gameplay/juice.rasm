@@ -1,0 +1,123 @@
+; gameplay/juice.rasm: camera shake and the hero's hit flash (presentation only)
+;
+; Per frame, before the camera: shocks add to `shake` (the orbital strike
+; landing, a pulse going off, the hero taking damage) and it decays
+; geometrically; the camera's eye and target move by a random offset of that
+; size while the matrices are built, then go back, so the follow camera keeps
+; its own smooth state.
+
+shake: f32 = 0.0
+hit_flash: f32 = 0.0
+juice_hp_was: f32 = 100.0
+juice_pulse_was: u32 = 0
+juice_bomb_was: u32 = 0
+juice_rng: u32 = 0x6C8E9CF5
+shake_off: [4]f32[align(16)] = {}
+k_shake_decay: const f32 = 0.86
+k_shake_bomb: const f32 = 1.4
+k_shake_pulse: const f32 = 0.5
+k_shake_hit: const f32 = 0.18
+k_shake_max: const f32 = 2.0
+k_shake_amp: const f32 = 0.45
+k_flash_drop: const f32 = 0.12
+k_hit_eps: const f32 = 0.001
+k_rand_scale: const f32 = 2.3841858e-07   ; 2 / 2^23
+k_rand_one: const f32 = 1.0
+
+; -> xmm0: a random number in [-1, 1)
+juice_random: proc() = {
+    mov eax, juice_rng
+    mov edx, eax
+    shl edx, 13
+    xor eax, edx
+    mov edx, eax
+    shr edx, 17
+    xor eax, edx
+    mov edx, eax
+    shl edx, 5
+    xor eax, edx
+    mov juice_rng, eax
+    shr eax, 9
+    vcvtsi2ss xmm0, xmm0, eax
+    vmulss xmm0, xmm0, k_rand_scale
+    vsubss xmm0, xmm0, k_rand_one
+    ret
+}
+
+juice_frame: proc() = {
+    sub rsp, 40
+    vmovss xmm4, shake
+    vmulss xmm4, xmm4, k_shake_decay
+    ; the strike landed since the last frame
+    mov eax, bomb_timer
+    test eax, eax
+    jnz no_strike
+    cmp juice_bomb_was, 0
+    je no_strike
+        vaddss xmm4, xmm4, k_shake_bomb
+    no_strike:
+    mov juice_bomb_was, eax
+    ; a pulse went off
+    mov eax, pulse_on
+    test eax, eax
+    jz no_pulse
+    cmp juice_pulse_was, 0
+    jne no_pulse
+        vaddss xmm4, xmm4, k_shake_pulse
+    no_pulse:
+    mov juice_pulse_was, eax
+    ; the hero was hurt
+    vmovss xmm5, hit_flash
+    vsubss xmm5, xmm5, k_flash_drop
+    vxorps xmm0, xmm0, xmm0
+    vmaxss xmm5, xmm5, xmm0
+    vmovss xmm0, hero_hp
+    vaddss xmm0, xmm0, k_hit_eps
+    vcomiss xmm0, juice_hp_was
+    jae not_hit
+    cmp hero_alive, 0
+    je not_hit
+        vaddss xmm4, xmm4, k_shake_hit
+        vmovss xmm5, k_rand_one
+    not_hit:
+    vmovss xmm0, hero_hp
+    vmovss juice_hp_was, xmm0
+    vmovss hit_flash, xmm5
+    vmovss frame_cb.params[1], xmm5
+    vminss xmm4, xmm4, k_shake_max
+    vmovss shake, xmm4
+    ; this frame's offset
+    vmulss xmm4, xmm4, k_shake_amp
+    vmovss dword ptr [rsp + 32], xmm4
+    call juice_random
+    vmulss xmm0, xmm0, dword ptr [rsp + 32]
+    vmovss shake_off[0], xmm0
+    call juice_random
+    vmulss xmm0, xmm0, dword ptr [rsp + 32]
+    vmovss shake_off[1], xmm0
+    call juice_random
+    vmulss xmm0, xmm0, dword ptr [rsp + 32]
+    vmovss shake_off[2], xmm0
+    add rsp, 40
+    ret
+}
+
+; Move the eye and the target by the shake (and back).
+shake_apply: proc() = {
+    vmovaps xmm0, xmmword ptr shake_off
+    vaddps xmm1, xmm0, xmmword ptr cam_eye
+    vmovaps xmmword ptr cam_eye, xmm1
+    vaddps xmm1, xmm0, xmmword ptr cam_target
+    vmovaps xmmword ptr cam_target, xmm1
+    ret
+}
+
+shake_remove: proc() = {
+    vmovaps xmm0, xmmword ptr cam_eye
+    vsubps xmm0, xmm0, xmmword ptr shake_off
+    vmovaps xmmword ptr cam_eye, xmm0
+    vmovaps xmm0, xmmword ptr cam_target
+    vsubps xmm0, xmm0, xmmword ptr shake_off
+    vmovaps xmmword ptr cam_target, xmm0
+    ret
+}

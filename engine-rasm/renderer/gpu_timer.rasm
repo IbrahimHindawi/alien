@@ -1,0 +1,139 @@
+; renderer/gpu_timer.rasm: the GPU's time per frame, from timestamp queries
+;
+; Each frame brackets its work with two timestamps inside a disjoint query.
+; The queries live in a ring of GPU_RING frames and are read when their slot
+; comes round again, so reading never waits on the GPU. update_title averages
+; the samples into stat_gpu_us for the overlay.
+
+#define GPU_RING 4
+
+gq_disjoint_desc: D3D11_QUERY_DESC = { .Query = D3D11_QUERY.D3D11_QUERY_TIMESTAMP_DISJOINT }
+gq_stamp_desc: D3D11_QUERY_DESC = { .Query = D3D11_QUERY.D3D11_QUERY_TIMESTAMP }
+gq_disjoint: [GPU_RING]*ID3D11Query = {}
+gq_begin: [GPU_RING]*ID3D11Query = {}
+gq_end: [GPU_RING]*ID3D11Query = {}
+gq_frame: u32 = 0
+gq_ok: u32 = 0
+gq_data: D3D11_QUERY_DATA_TIMESTAMP_DISJOINT = {}
+gq_t0: u64 = 0
+gq_t1: u64 = 0
+gpu_us_sum: u64 = 0
+gpu_samples: u32 = 0
+stat_gpu_us: u32 = 0
+
+; Create the ring. A failure only turns the timer off.
+gpu_timer_init: proc() = {
+    push rbx
+    sub rsp, 48                        ; 8 + 8 + 48 = 64
+    xor ebx, ebx
+one:
+    lea r8, gq_disjoint
+    lea r8, [r8 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateQuery, gq_disjoint_desc&, r8)
+    test eax, eax
+    js failed
+    lea r8, gq_begin
+    lea r8, [r8 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateQuery, gq_stamp_desc&, r8)
+    test eax, eax
+    js failed
+    lea r8, gq_end
+    lea r8, [r8 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateQuery, gq_stamp_desc&, r8)
+    test eax, eax
+    js failed
+    inc ebx
+    cmp ebx, GPU_RING
+    jb one
+    mov gq_ok, 1
+failed:
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+gpu_frame_begin: proc() = {
+    push rbx
+    sub rsp, 48
+    cmp gq_ok, 0
+    je done
+    mov ebx, gq_frame
+    and ebx, GPU_RING - 1
+    lea rax, gq_disjoint
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.Begin, rdx)
+    lea rax, gq_begin
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.End, rdx)
+done:
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+gpu_frame_end: proc() = {
+    push rbx
+    sub rsp, 48
+    cmp gq_ok, 0
+    je done
+    mov ebx, gq_frame
+    and ebx, GPU_RING - 1
+    lea rax, gq_end
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.End, rdx)
+    lea rax, gq_disjoint
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.End, rdx)
+    inc gq_frame
+    cmp gq_frame, GPU_RING
+    jb done
+    ; the slot issued GPU_RING frames ago, reused next frame
+    mov ebx, gq_frame
+    and ebx, GPU_RING - 1
+    lea rax, gq_disjoint
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.GetData, rdx, gq_data&, 16, 0)
+    test eax, eax
+    jnz done                           ; S_FALSE: not ready, skip this sample
+    cmp gq_data.Disjoint, 0
+    jne done
+    lea rax, gq_begin
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.GetData, rdx, gq_t0&, 8, 0)
+    test eax, eax
+    jnz done
+    lea rax, gq_end
+    mov rdx, [rax + rbx*8]
+    vcall(context, ID3D11DeviceContextVtbl.GetData, rdx, gq_t1&, 8, 0)
+    test eax, eax
+    jnz done
+    mov rax, gq_t1
+    sub rax, gq_t0
+    mov rcx, 1000000
+    mul rcx
+    mov rcx, gq_data.Frequency
+    test rcx, rcx
+    jz done
+    div rcx
+    add gpu_us_sum, rax
+    inc gpu_samples
+done:
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+; For the overlay: the mean since the last call.
+gpu_timer_average: proc() = {
+    mov ecx, gpu_samples
+    test ecx, ecx
+    jz done
+    mov rax, gpu_us_sum
+    xor edx, edx
+    div rcx
+    mov stat_gpu_us, eax
+    mov gpu_us_sum, 0
+    mov gpu_samples, 0
+done:
+    ret
+}

@@ -282,6 +282,7 @@ camera_update: proc() = {
     vminss xmm0, xmm0, k_zoom_max
     vmovss cam_zoom, xmm0
     call camera_modes
+    call shake_apply
     ; matrices
     invoke(look_at_lh, cam_view&, cam_eye&, cam_target&, cam_up&)
     mov eax, client_width
@@ -297,6 +298,7 @@ camera_update: proc() = {
     mov rcx, cam_proj&
     call perspective_lh
     invoke(m4_mul, cam_view_proj&, cam_view&, cam_proj&)
+    call shake_remove
     ; aim: the screen centre in third person, else the ground under the mouse
     cmp cam_mode, 0
     je mouse_aim

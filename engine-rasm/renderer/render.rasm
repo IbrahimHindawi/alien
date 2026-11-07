@@ -495,6 +495,7 @@ instance:
     call gems_init
     test eax, eax
     jz failed
+    call gpu_timer_init
     invoke(arena_reset, arena_frame&)
     mov eax, 1
     jmp done
@@ -767,6 +768,7 @@ render_frame: proc() = {
     je sized
         call render_resize
     sized:
+    call gpu_frame_begin
     call render_instances
     ; frame constants
     lea rsi, cam_view_proj
@@ -913,6 +915,7 @@ next_lod:
         mov capture_target, rax
         call render_capture
     no_capture:
+    call gpu_frame_end
     mov eax, opt_vsync
     vcall(swap_chain, IDXGISwapChainVtbl.Present, rax, 0)
     add rsp, 72
