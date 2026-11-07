@@ -344,3 +344,18 @@ and bucket passes.
 | 1M dense | ~3500 | 3520 |
 
 **Kept.**
+
+## 2026-11-07: per-row cap fallback and early exit (kept); quadrant groups (discarded)
+
+- **Kept**: the fast loop snapshots the sums before each window row; a row in
+  which a lane passes 16 hits is redone exactly from the snapshot (a lane's
+  own row is cz, so past it the restored count drops itself), and the exact
+  loop stops once every lane has its 16. Dense 1M: 1T 33.4 -> 31.1 ms, 16T
+  3.6 -> 3.0 ms; 100k at 16 threads 168 -> 137 us.
+- **Quadrant groups (discarded)**: inside a crowded cell, lanes grouped by
+  quadrant (AVX2 gathers) need only a 2x2 window. Exact (every hash), but
+  slower at every threshold (dense 1T 31.1 -> 31.4 ms at >= 16 per cell,
+  35.5 at >= 10, 39.6 at >= 6): a crowded cell holds ~11, so a quadrant group
+  has ~3 lanes of 8, and the gathers cost more than the smaller window saves.
+  Profile that led there: dense separation is all fast-path candidates
+  (~15M evaluations per tick, ~121 per group of 8), almost none exact.

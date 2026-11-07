@@ -74,6 +74,7 @@ adds on top of the same design.
 | dead left to the build, incremental rebuild, windowed sweep, area by region, cells from integration | 1575 | 293 | 16039 | 1896 | 42215 | 3732 |
 | separation fast path (no self test, lazy cap) | 1366 | 286 | 13498 | 1768 | 33070 | 3024 |
 | AVX2 band prefix, chunk affinity in the pool | 1394 | 168 | 13444 | 1330 | 32204 | 3520 |
+| per-row cap fallback, all-capped exit | 1312 | 137 | 12184 | 1455 | 31142 | 2979 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
 
 All six ideas are now in the assembly engine, each exact (every hash
