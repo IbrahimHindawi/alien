@@ -849,47 +849,73 @@ gathered_b:
     mov ecx, dword ptr [rsi + rax*4 + 4 + GRID_DIM * 4]         ; start of row lo + 1
     mov edx, dword ptr [rsi + rax*4 + 4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
     call sim_separate_v4
-    ; the rows either side of the boundary with the band below (lo - 1, lo)
-    ; need only the two bands: when the band below is finished (usually this
-    ; thread's previous band), separate them now and claim the boundary
+    ; Boundary rows. The two rows either side of a boundary between bands
+    ; need only those two bands. Each band, when finished, publishes its
+    ; stamp with a locked exchange (a full fence), then claims (lock cmpxchg)
+    ; each boundary whose other band is finished too and separates its rows:
+    ; of two neighbours, the later one always sees the earlier one done, and
+    ; only one claim succeeds. No pass over the edges, no barrier for them.
     mov eax, dword ptr [rsp + 24]
     shr eax, BAND_SHIFT
     mov dword ptr [rsp + 32], eax      ; band
     mov rsi, sim_cell_start
     test eax, eax
-    jnz has_below
+    jnz not_first
         mov ecx, dword ptr [rsi]                       ; band 0: row 0 has no row below
         mov edx, dword ptr [rsi + GRID_DIM * 4]
         call sim_separate_v4
-        mov dword ptr edge_claim[0], 1
-        jmp below_done
-    has_below:
+    not_first:
+    cmp dword ptr [rsp + 32], GRID_BANDS - 1
+    jne not_last
+        mov rsi, sim_cell_start                        ; the last band: row 1023 has no row above
+        mov ecx, dword ptr [rsi + (GRID_CELLS - GRID_DIM) * 4]
+        mov edx, dword ptr [rsp + 8]
+        call sim_separate_v4
+    not_last:
+    mov eax, grid_build_id
+    mov ecx, dword ptr [rsp + 32]
+    lea rdx, band_done
+    xchg dword ptr [rdx + rcx*4], eax  ; publish (xchg with memory is locked)
+    ; the boundary below: rows lo - 1 and lo
+    mov eax, dword ptr [rsp + 32]
+    test eax, eax
+    jz below_done
     lea rdx, band_done
     mov ecx, dword ptr [rdx + rax*4 - 4]
     cmp ecx, grid_build_id
     jne below_done
+    lea rdx, edge_claim
+    xor eax, eax
+    mov ecx, 1
+    mov r8d, dword ptr [rsp + 32]
+    lock cmpxchg dword ptr [rdx + r8*4], ecx
+    jnz below_done
+    mov rsi, sim_cell_start
     mov eax, dword ptr [rsp + 24]
     mov ecx, dword ptr [rsi + rax*4 - GRID_DIM * 4]  ; start of row lo - 1
     mov edx, dword ptr [rsi + rax*4 + GRID_DIM * 4]  ; start of row lo + 1
     call sim_separate_v4
-    mov eax, dword ptr [rsp + 32]
-    lea rdx, edge_claim
-    mov dword ptr [rdx + rax*4], 1
 below_done:
-    ; the last band's top row has no row above
-    cmp dword ptr [rsp + 32], GRID_BANDS - 1
-    jne top_done
-    mov rsi, sim_cell_start
-    mov ecx, dword ptr [rsi + (GRID_CELLS - GRID_DIM) * 4]
-    mov edx, dword ptr [rsp + 8]
-    call sim_separate_v4
-    mov dword ptr edge_claim[GRID_BANDS * 4], 1
-top_done:
-    ; finished: the next band may now read this one
-    mov eax, grid_build_id
-    mov ecx, dword ptr [rsp + 32]
+    ; the boundary above: rows lo + 7 and lo + 8
+    mov eax, dword ptr [rsp + 32]
+    cmp eax, GRID_BANDS - 1
+    je above_done
     lea rdx, band_done
-    mov dword ptr [rdx + rcx*4], eax
+    mov ecx, dword ptr [rdx + rax*4 + 4]
+    cmp ecx, grid_build_id
+    jne above_done
+    lea rdx, edge_claim
+    xor eax, eax
+    mov ecx, 1
+    mov r8d, dword ptr [rsp + 32]
+    lock cmpxchg dword ptr [rdx + r8*4 + 4], ecx
+    jnz above_done
+    mov rsi, sim_cell_start
+    mov eax, dword ptr [rsp + 24]
+    mov ecx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]  ; start of row lo + 7
+    mov edx, dword ptr [rsi + rax*4 + 9 * GRID_DIM * 4]  ; start of row lo + 9
+    call sim_separate_v4
+above_done:
 not_fused:
     add rsp, 72
     pop rbp
@@ -1237,11 +1263,7 @@ bands_ready:
     je unfused
     cmp grid_fuse_now, 0
     je by_slots
-    ; the boundary rows, now that every band is built
-    mov rcx, grid_edge_job&
-    mov edx, GRID_BANDS
-    mov r8d, 1
-    call pool_dispatch
+    ; (every boundary was claimed by one of its two bands)
     jmp separated
 by_slots:
     ; a dense crowd: separation over chunks of slots, on every thread
