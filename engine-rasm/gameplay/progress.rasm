@@ -1,0 +1,757 @@
+; gameplay/progress.rasm: a run's progression: XP gems, levels, upgrade picks
+;
+; Game layer only. game_on is set by run_game; --bench-sim and --test never set
+; it, so SIM 5 stays exact wherever it is measured. The layer runs between
+; ticks: it turns death events into gems, pulls gems to the hero, levels up,
+; and changes the simulation's tunables (combat.rasm, abilities.rasm, sim.rasm)
+; when the player picks an upgrade. While a pick is open the simulation waits.
+
+#define GEM_MAX 4096
+#define UPGRADES 12
+#define HP_STEP_TICKS 5400
+#define GEM_EVERY 3
+#define GEM_LIFE 1800
+
+game_on: u32 = 0
+game_xp: u32 = 0
+game_level: u32 = 1
+game_xp_next: u32 = 38
+game_choosing: u32 = 0
+game_choice: [4]u32 = {}
+game_choice_n: u32 = 0
+game_pool: [UPGRADES]u32 = {}
+game_ranks: [UPGRADES]u32 = {}
+game_rank_max: [UPGRADES]const u32 = { 3, 4, 5, 4, 5, 8, 5, 4, 4, 4, 3, 4 }
+hero_hp_max: f32 = 100.0
+hero_regen: f32 = 0.0                  ; hp per tick
+magnet_r2: f32 = 36.0
+game_rng: u32 = 0x2545F491
+game_death_seen: u32 = 0
+game_mouse_was: u32 = 0
+game_flash: f32 = 0.0
+gem_count: u32 = 0
+gem_merge: u32 = 0
+gem_x: [GEM_MAX]f32 = {}
+gem_z: [GEM_MAX]f32 = {}
+gem_v: [GEM_MAX]u32 = {}
+gem_t: [GEM_MAX]u32 = {}                ; tick dropped
+gem_drop: u32 = 0
+
+k_gem_take2: const f32 = 1.44         ; collected within 1.2 m
+k_gem_pull: const f32 = 0.55           ; metres per tick toward the hero inside the magnet
+k_up_swift: const f32 = 1.12
+k_up_push: const f32 = 1.2
+k_up_beam: const f32 = 1.5
+k_up_magnet: const f32 = 2.56          ; radius x 1.6
+k_up_hp: const f32 = 25.0
+k_up_half: const f32 = 0.5
+k_regen_step: const f32 = 0.016666668  ; 1 hp per second
+k_flash_decay: const f32 = 0.04
+
+; A fresh run's progression.
+game_reset: proc() = {
+    mov game_xp, 0
+    mov game_level, 1
+    mov game_xp_next, 38
+    mov game_choosing, 0
+    mov game_choice_n, 0
+    mov gem_count, 0
+    mov hero_hp_max, 0x42C80000        ; 100.0
+    mov hero_regen, 0
+    mov magnet_r2, 0x42100000          ; 36.0
+    mov eax, death_count
+    mov game_death_seen, eax
+    xor eax, eax
+    lea rdx, game_ranks
+    mov ecx, UPGRADES
+zero:
+    mov dword ptr [rdx + rcx*4 - 4], eax
+    dec ecx
+    jnz zero
+    ret
+}
+
+; -> eax: a game-side random u32 (xorshift32; never the simulation's stream)
+game_random: proc() -> u32 = {
+    mov eax, game_rng
+    mov edx, eax
+    shl edx, 13
+    xor eax, edx
+    mov edx, eax
+    shr edx, 17
+    xor eax, edx
+    mov edx, eax
+    shl edx, 5
+    xor eax, edx
+    mov game_rng, eax
+    ret
+}
+
+; Offer up to three different upgrades that are not maxed out.
+game_roll: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 40                        ; 8 + 16 + 40 = 64
+    xor ebx, ebx                       ; eligible
+    xor esi, esi                       ; upgrade id
+collect:
+    lea rax, game_ranks
+    mov ecx, dword ptr [rax + rsi*4]
+    lea rax, game_rank_max
+    cmp ecx, dword ptr [rax + rsi*4]
+    jae skip
+    lea rax, game_pool
+    mov dword ptr [rax + rbx*4], esi
+    inc ebx
+skip:
+    inc esi
+    cmp esi, UPGRADES
+    jb collect
+    test ebx, ebx
+    jz nothing                         ; everything maxed: no pick, keep fighting
+    xor esi, esi                       ; slot
+pick:
+    cmp esi, 3
+    jae picked
+    cmp esi, ebx
+    jae picked
+    call game_random
+    xor edx, edx
+    mov ecx, ebx
+    sub ecx, esi
+    div ecx
+    add edx, esi                       ; j = slot + random % (eligible - slot)
+    lea rax, game_pool
+    mov ecx, dword ptr [rax + rdx*4]
+    mov r8d, dword ptr [rax + rsi*4]
+    mov dword ptr [rax + rsi*4], ecx
+    mov dword ptr [rax + rdx*4], r8d
+    lea rax, game_choice
+    mov dword ptr [rax + rsi*4], ecx
+    inc esi
+    jmp pick
+picked:
+    mov game_choice_n, esi
+    mov game_choosing, 1
+nothing:
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
+}
+
+; ecx: the slot picked (0..2). Applies that upgrade and resumes the run.
+game_pick: proc(slot: u32) = {
+    cmp ecx, game_choice_n
+    jae done
+    lea rax, game_choice
+    mov eax, dword ptr [rax + rcx*4]
+    lea rdx, game_ranks
+    inc dword ptr [rdx + rax*4]
+    cmp eax, 0
+    je rapid
+    cmp eax, 1
+    je split
+    cmp eax, 2
+    je pierce
+    cmp eax, 3
+    je heavy
+    cmp eax, 4
+    je swift
+    cmp eax, 5
+    je vitality
+    cmp eax, 6
+    je regen
+    cmp eax, 7
+    je shockwave
+    cmp eax, 8
+    je overcharge
+    cmp eax, 9
+    je barrage
+    cmp eax, 10
+    je blink
+    jmp magnet
+rapid:
+    cmp g_fire_interval, 1
+    jbe applied
+    dec g_fire_interval
+    jmp applied
+split:
+    inc g_multishot
+    jmp applied
+pierce:
+    add g_pierce, 2
+    jmp applied
+heavy:
+    vmovss xmm0, g_damage
+    vaddss xmm0, xmm0, k_up_half
+    vmovss g_damage, xmm0
+    jmp applied
+swift:
+    vmovss xmm0, g_hero_speed
+    vmulss xmm0, xmm0, k_up_swift
+    vmovss g_hero_speed, xmm0
+    jmp applied
+vitality:
+    vmovss xmm0, hero_hp_max
+    vaddss xmm0, xmm0, k_up_hp
+    vmovss hero_hp_max, xmm0
+    vmovss hero_hp, xmm0
+    jmp applied
+regen:
+    vmovss xmm0, hero_regen
+    vaddss xmm0, xmm0, k_regen_step
+    vmovss hero_regen, xmm0
+    jmp applied
+shockwave:
+    mov eax, g_pulse_cd
+    lea eax, [rax + rax*2]
+    shr eax, 2
+    mov g_pulse_cd, eax
+    vmovss xmm0, g_pulse_push
+    vmulss xmm0, xmm0, k_up_push
+    vmovss g_pulse_push, xmm0
+    jmp applied
+overcharge:
+    vmovss xmm0, g_beam_dpt
+    vmulss xmm0, xmm0, k_up_beam
+    vmovss g_beam_dpt, xmm0
+    vmovss xmm0, g_energy_regen
+    vmulss xmm0, xmm0, k_up_beam
+    vmovss g_energy_regen, xmm0
+    jmp applied
+barrage:
+    mov eax, g_bomb_cd
+    lea eax, [rax + rax*2]
+    shr eax, 2
+    mov g_bomb_cd, eax
+    jmp applied
+blink:
+    mov eax, g_dash_cd
+    imul eax, eax, 7
+    xor edx, edx
+    mov ecx, 10
+    div ecx
+    mov g_dash_cd, eax
+    jmp applied
+magnet:
+    vmovss xmm0, magnet_r2
+    vmulss xmm0, xmm0, k_up_magnet
+    vmovss magnet_r2, xmm0
+applied:
+    mov game_choosing, 0
+    mov game_flash, 0x3F800000         ; 1.0
+done:
+    ret
+}
+
+; One tick of the game layer, after sim_step.
+game_tick: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    ; deaths become gems (a full ring merges into an existing gem)
+    mov esi, game_death_seen
+    mov edi, death_count
+deaths:
+    cmp esi, edi
+    jae deaths_done
+    lea rax, death_x
+    mov edx, dword ptr [rax + rsi*4]
+    lea rax, death_z
+    mov r8d, dword ptr [rax + rsi*4]
+    inc gem_drop                       ; one gem per GEM_EVERY deaths, worth GEM_EVERY
+    mov eax, gem_drop
+    xor edx, edx
+    mov ecx, GEM_EVERY
+    div ecx
+    test edx, edx
+    jnz next_death
+    lea rax, death_x
+    mov edx, dword ptr [rax + rsi*4]
+    mov ecx, gem_count
+    cmp ecx, GEM_MAX
+    jae merge
+        lea rax, gem_x
+        mov dword ptr [rax + rcx*4], edx
+        lea rax, gem_z
+        mov dword ptr [rax + rcx*4], r8d
+        lea rax, gem_v
+        mov dword ptr [rax + rcx*4], GEM_EVERY
+        lea rax, gem_t
+        mov r9d, sim_tick
+        mov dword ptr [rax + rcx*4], r9d
+        inc gem_count
+        jmp next_death
+    merge:
+        mov eax, gem_merge
+        inc gem_merge
+        and eax, GEM_MAX - 1
+        lea rcx, gem_v
+        add dword ptr [rcx + rax*4], GEM_EVERY
+    next_death:
+    inc esi
+    jmp deaths
+deaths_done:
+    mov game_death_seen, edi
+    ; aliens toughen: one more hit every 90 seconds
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, HP_STEP_TICKS
+    div ecx
+    inc eax
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss g_spawn_hp, xmm0
+    cmp hero_alive, 0
+    je done
+    ; regeneration
+    vmovss xmm0, hero_hp
+    vaddss xmm0, xmm0, hero_regen
+    vminss xmm0, xmm0, hero_hp_max
+    vmovss hero_hp, xmm0
+    ; gems: collected on contact, pulled in inside the magnet
+    vmovss xmm4, hero_x
+    vmovss xmm5, hero_z
+    xor esi, esi
+gem:
+    cmp esi, gem_count
+    jae gems_done
+    mov eax, sim_tick
+    lea rdx, gem_t
+    sub eax, dword ptr [rdx + rsi*4]
+    cmp eax, GEM_LIFE
+    jae expire
+    lea rax, gem_x
+    vsubss xmm0, xmm4, dword ptr [rax + rsi*4]     ; toward the hero
+    lea rax, gem_z
+    vsubss xmm1, xmm5, dword ptr [rax + rsi*4]
+    vmulss xmm2, xmm0, xmm0
+    vmulss xmm3, xmm1, xmm1
+    vaddss xmm2, xmm2, xmm3
+    vcomiss xmm2, k_gem_take2
+    jb take
+    vcomiss xmm2, magnet_r2
+    jae next_gem
+    vsqrtss xmm3, xmm2, xmm2                       ; d
+    vmovss xmm2, k_gem_pull
+    vminss xmm2, xmm2, xmm3
+    vdivss xmm2, xmm2, xmm3
+    vmulss xmm0, xmm0, xmm2
+    vmulss xmm1, xmm1, xmm2
+    lea rax, gem_x
+    vaddss xmm0, xmm0, dword ptr [rax + rsi*4]
+    vmovss dword ptr [rax + rsi*4], xmm0
+    lea rax, gem_z
+    vaddss xmm1, xmm1, dword ptr [rax + rsi*4]
+    vmovss dword ptr [rax + rsi*4], xmm1
+next_gem:
+    inc esi
+    jmp gem
+take:
+    lea rax, gem_v
+    mov edx, dword ptr [rax + rsi*4]
+    add game_xp, edx
+expire:
+    mov ecx, gem_count
+    dec ecx
+    mov gem_count, ecx
+    lea rax, gem_x
+    mov edx, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rsi*4], edx
+    lea rax, gem_z
+    mov edx, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rsi*4], edx
+    lea rax, gem_v
+    mov edx, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rsi*4], edx
+    lea rax, gem_t
+    mov edx, dword ptr [rax + rcx*4]
+    mov dword ptr [rax + rsi*4], edx
+    jmp gem                            ; the slot now holds the last gem
+gems_done:
+    ; level up: open a pick (autoplay takes the first offer)
+    cmp game_choosing, 0
+    jne done
+    mov eax, game_xp
+    cmp eax, game_xp_next
+    jb done
+    sub eax, game_xp_next
+    mov game_xp, eax
+    inc game_level
+    mov eax, game_level                ; next = 20 + 15 L + 3 L * L
+    mov ecx, eax
+    imul ecx, ecx
+    imul eax, eax, 15
+    lea ecx, [rcx + rcx*2]
+    lea eax, [rax + rcx + 20]
+    mov game_xp_next, eax
+    call game_roll
+    cmp opt_autoplay, 0
+    je done
+        call game_random
+        xor edx, edx
+        mov ecx, 3
+        div ecx
+        mov ecx, edx
+        call game_pick
+done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; Per frame while a pick is open: keys 1, 2, 3 or a click on a card.
+game_input: proc() = {
+    push rbx
+    sub rsp, 48                        ; 8 + 8 + 48 = 64
+    mov ebx, mouse_buttons
+    and ebx, 1
+    cmp game_choosing, 0
+    je done
+    lea rax, keys_pressed
+    xor ecx, ecx
+    cmp byte ptr [rax + 0x31], 0
+    jne pick
+    mov ecx, 1
+    cmp byte ptr [rax + 0x32], 0
+    jne pick
+    mov ecx, 2
+    cmp byte ptr [rax + 0x33], 0
+    jne pick
+    ; a click (press edge) inside a card
+    test ebx, ebx
+    jz done
+    cmp game_mouse_was, 0
+    jne done
+    xor ecx, ecx
+card:
+    cmp ecx, game_choice_n
+    jae done
+    mov dword ptr [rsp + 32], ecx
+    call card_origin                   ; xmm0 x, xmm1 y
+    mov ecx, dword ptr [rsp + 32]
+    mov eax, mouse_x
+    vcvtsi2ss xmm2, xmm2, eax
+    vcomiss xmm2, xmm0
+    jb next_card
+    vaddss xmm0, xmm0, k_card_w
+    vcomiss xmm2, xmm0
+    jae next_card
+    mov eax, mouse_y
+    vcvtsi2ss xmm2, xmm2, eax
+    vcomiss xmm2, xmm1
+    jb next_card
+    vaddss xmm1, xmm1, k_card_h
+    vcomiss xmm2, xmm1
+    jb pick
+next_card:
+    inc ecx
+    jmp card
+pick:
+    call game_pick
+done:
+    mov game_mouse_was, ebx
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+; ecx: card slot -> xmm0 x, xmm1 y of its top left corner (pixels)
+k_card_w: const f32 = 300.0
+k_card_h: const f32 = 230.0
+k_card_step: const f32 = 330.0
+k_card_left: const f32 = 480.0
+k_card_up: const f32 = 115.0
+card_origin: proc(slot: u32) = {
+    vcvtsi2ss xmm0, xmm0, ecx
+    vmulss xmm0, xmm0, k_card_step
+    vmovss xmm1, frame_cb.screen[0]
+    vmulss xmm1, xmm1, k_half
+    vaddss xmm0, xmm0, xmm1
+    vsubss xmm0, xmm0, k_card_left
+    vmovss xmm1, frame_cb.screen[1]
+    vmulss xmm1, xmm1, k_half
+    vsubss xmm1, xmm1, k_card_up
+    ret
+}
+
+; ecx: upgrade id -> rax name, rdx description
+upgrade_text: proc(id: u32) = {
+    lea rax, up_name_0
+    lea rdx, up_desc_0
+    cmp ecx, 0
+    je done
+    lea rax, up_name_1
+    lea rdx, up_desc_1
+    cmp ecx, 1
+    je done
+    lea rax, up_name_2
+    lea rdx, up_desc_2
+    cmp ecx, 2
+    je done
+    lea rax, up_name_3
+    lea rdx, up_desc_3
+    cmp ecx, 3
+    je done
+    lea rax, up_name_4
+    lea rdx, up_desc_4
+    cmp ecx, 4
+    je done
+    lea rax, up_name_5
+    lea rdx, up_desc_5
+    cmp ecx, 5
+    je done
+    lea rax, up_name_6
+    lea rdx, up_desc_6
+    cmp ecx, 6
+    je done
+    lea rax, up_name_7
+    lea rdx, up_desc_7
+    cmp ecx, 7
+    je done
+    lea rax, up_name_8
+    lea rdx, up_desc_8
+    cmp ecx, 8
+    je done
+    lea rax, up_name_9
+    lea rdx, up_desc_9
+    cmp ecx, 9
+    je done
+    lea rax, up_name_10
+    lea rdx, up_desc_10
+    cmp ecx, 10
+    je done
+    lea rax, up_name_11
+    lea rdx, up_desc_11
+done:
+    ret
+}
+up_name_0: [16]const u8 = "RAPID FIRE"
+up_desc_0: [32]const u8 = "FIRE RATE UP"
+up_name_1: [16]const u8 = "SPLIT SHOT"
+up_desc_1: [32]const u8 = "+2 BOLTS PER VOLLEY"
+up_name_2: [16]const u8 = "PIERCING"
+up_desc_2: [32]const u8 = "BOLTS PIERCE 2 MORE"
+up_name_3: [16]const u8 = "HEAVY BOLTS"
+up_desc_3: [32]const u8 = "BOLT DAMAGE +50%"
+up_name_4: [16]const u8 = "SWIFT"
+up_desc_4: [32]const u8 = "MOVE SPEED +12%"
+up_name_5: [16]const u8 = "VITALITY"
+up_desc_5: [32]const u8 = "+25 MAX HEALTH. HEAL"
+up_name_6: [16]const u8 = "REGENERATE"
+up_desc_6: [32]const u8 = "HEAL 1 HP PER SECOND"
+up_name_7: [16]const u8 = "SHOCKWAVE"
+up_desc_7: [32]const u8 = "PULSE -25% CD +20% PUSH"
+up_name_8: [16]const u8 = "OVERCHARGE"
+up_desc_8: [32]const u8 = "BEAM DAMAGE+ENERGY +50%"
+up_name_9: [16]const u8 = "BARRAGE"
+up_desc_9: [32]const u8 = "ORBITAL COOLDOWN -25%"
+up_name_10: [16]const u8 = "BLINK"
+up_desc_10: [32]const u8 = "DASH COOLDOWN -30%"
+up_name_11: [16]const u8 = "MAGNET"
+up_desc_11: [32]const u8 = "PICKUP RANGE +60%"
+
+; The cards, drawn by hud_draw while a pick is open.
+game_draw_cards: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 80                        ; 8 + 24 + 80 = 112; xmm6, xmm7 at [rsp + 32], [rsp + 48]
+    movaps xmmword ptr [rsp + 32], xmm6
+    movaps xmmword ptr [rsp + 48], xmm7
+    ; dim the world
+    vxorps xmm0, xmm0, xmm0
+    vxorps xmm1, xmm1, xmm1
+    vmovss xmm2, frame_cb.screen[0]
+    vmovss xmm3, frame_cb.screen[1]
+    lea rcx, col_shade
+    call ui_rect
+    ; title
+    vmovss xmm0, frame_cb.screen[0]
+    vmulss xmm0, xmm0, k_half
+    vsubss xmm0, xmm0, k_levelup_w
+    vmovss xmm1, frame_cb.screen[1]
+    vmulss xmm1, xmm1, k_half
+    vsubss xmm1, xmm1, k_levelup_up
+    vmovss xmm2, k_hud_big
+    lea rcx, levelup_label
+    lea rdx, col_cyan
+    call ui_text
+    xor ebx, ebx
+card:
+    cmp ebx, game_choice_n
+    jae cards_done
+    mov ecx, ebx
+    call card_origin
+    vmovss xmm6, xmm0, xmm0
+    vmovss xmm7, xmm1, xmm1
+    ; border, then the panel
+    vsubss xmm0, xmm6, k_card_border
+    vsubss xmm1, xmm7, k_card_border
+    vmovss xmm2, k_card_w
+    vaddss xmm2, xmm2, k_card_border2
+    vmovss xmm3, k_card_h
+    vaddss xmm3, xmm3, k_card_border2
+    lea rcx, col_cyan
+    call ui_rect
+    vmovss xmm0, xmm6, xmm6
+    vmovss xmm1, xmm7, xmm7
+    vmovss xmm2, k_card_w
+    vmovss xmm3, k_card_h
+    lea rcx, col_card
+    call ui_rect
+    ; [n]
+    call ui_str_clear
+    invoke(ui_str_cat, "[")
+    lea ecx, [rbx + 1]
+    call ui_str_u32
+    invoke(ui_str_cat, "]")
+    vaddss xmm0, xmm6, k_card_pad
+    vaddss xmm1, xmm7, k_card_pad
+    vmovss xmm2, k_hud_mid
+    lea rcx, ui_text_buf
+    lea rdx, col_dim
+    call ui_text
+    ; name and description
+    lea rax, game_choice
+    mov esi, dword ptr [rax + rbx*4]
+    mov ecx, esi
+    call upgrade_text
+    mov rdi, rdx
+    vaddss xmm0, xmm6, k_card_pad
+    vaddss xmm1, xmm7, k_card_name_y
+    vmovss xmm2, k_hud_mid
+    mov rcx, rax
+    lea rdx, col_text
+    call ui_text
+    vaddss xmm0, xmm6, k_card_pad
+    vaddss xmm1, xmm7, k_card_desc_y
+    vmovss xmm2, k_hud_small
+    mov rcx, rdi
+    lea rdx, col_cyan
+    call ui_text
+    ; rank pips
+    call ui_str_clear
+    invoke(ui_str_cat, "RANK ")
+    lea rax, game_ranks
+    mov ecx, dword ptr [rax + rsi*4]
+    inc ecx
+    call ui_str_u32
+    invoke(ui_str_cat, "/")
+    lea rax, game_rank_max
+    mov ecx, dword ptr [rax + rsi*4]
+    call ui_str_u32
+    vaddss xmm0, xmm6, k_card_pad
+    vaddss xmm1, xmm7, k_card_rank_y
+    vmovss xmm2, k_hud_small
+    lea rcx, ui_text_buf
+    lea rdx, col_dim
+    call ui_text
+    inc ebx
+    jmp card
+cards_done:
+    movaps xmm6, xmmword ptr [rsp + 32]
+    movaps xmm7, xmmword ptr [rsp + 48]
+    add rsp, 80
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+levelup_label: [16]const u8 = "LEVEL UP"
+k_levelup_w: const f32 = 120.0         ; half of 8 glyphs * 6 * 5
+k_levelup_up: const f32 = 200.0
+k_card_border: const f32 = 2.0
+k_card_border2: const f32 = 4.0
+k_card_pad: const f32 = 18.0
+k_card_name_y: const f32 = 70.0
+k_card_desc_y: const f32 = 120.0
+k_card_rank_y: const f32 = 190.0
+col_shade: [4]const f32[align(16)] = { 0.0, 0.0, 0.02, 0.55 }
+col_card: [4]const f32[align(16)] = { 0.01, 0.015, 0.03, 0.95 }
+
+; gems: rendered as spinning green crystals --------------------------------------
+
+gem_buffer: *ID3D11Buffer = {}
+vs_gem: *ID3D11VertexShader = {}
+gem_desc: D3D11_BUFFER_DESC = {
+    .ByteWidth = GEM_MAX * INSTANCE_BYTES,
+    .Usage = D3D11_USAGE.D3D11_USAGE_DYNAMIC,
+    .BindFlags = D3D11_BIND_FLAG.D3D11_BIND_VERTEX_BUFFER,
+    .CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_WRITE,
+}
+
+; -> eax 1 ok
+gems_init: proc() -> b32 = {
+    sub rsp, 40
+    vcall(device, ID3D11DeviceVtbl.CreateBuffer, gem_desc&, 0, gem_buffer&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\gem_vs.cso")
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rax, render_shader_size, 0, vs_gem&)
+    test eax, eax
+    js failed
+    mov eax, 1
+    jmp done
+failed:
+    xor eax, eax
+done:
+    add rsp, 40
+    ret
+}
+
+; Instances float4(x, z, value, 0); the unit pipeline with the shard mesh.
+render_gems: proc() = {
+    sub rsp, 56
+    mov eax, gem_count
+    test eax, eax
+    jz done
+    vcall(context, ID3D11DeviceContextVtbl.Map, gem_buffer, 0, D3D11_MAP.D3D11_MAP_WRITE_DISCARD, 0, mapped&)
+    test eax, eax
+    js done
+    mov rdx, mapped.pData
+    xor ecx, ecx
+gem:
+    cmp ecx, gem_count
+    jae written
+    lea rax, gem_x
+    vmovss xmm0, dword ptr [rax + rcx*4]
+    lea rax, gem_z
+    vinsertps xmm0, xmm0, dword ptr [rax + rcx*4], 0x10
+    lea rax, gem_v
+    mov r8d, dword ptr [rax + rcx*4]
+    vcvtsi2ss xmm1, xmm1, r8d
+    vinsertps xmm0, xmm0, xmm1, 0x20
+    vmovups xmmword ptr [rdx], xmm0
+    add rdx, 16
+    inc ecx
+    jmp gem
+written:
+    vcall(context, ID3D11DeviceContextVtbl.Unmap, gem_buffer, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, input_layout)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_gem, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_unit, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 0, 1, shard_mesh.vb&, mesh_stride&, mesh_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetVertexBuffers, 1, 1, gem_buffer&, instance_stride&, instance_offset&)
+    vcall(context, ID3D11DeviceContextVtbl.IASetIndexBuffer, shard_mesh.ib, DXGI_FORMAT.DXGI_FORMAT_R32_UINT, 0)
+    mov eax, shard_mesh.index_count
+    mov r8d, gem_count
+    vcall(context, ID3D11DeviceContextVtbl.DrawIndexedInstanced, rax, r8, 0, 0, 0)
+done:
+    add rsp, 56
+    ret
+}
+
+; Decay of the level-up flash, per frame.
+game_frame: proc() = {
+    vmovss xmm0, game_flash
+    vsubss xmm0, xmm0, k_flash_decay
+    vxorps xmm1, xmm1, xmm1
+    vmaxss xmm0, xmm0, xmm1
+    vmovss game_flash, xmm0
+    vmovss frame_cb.game[2], xmm0
+    ret
+}

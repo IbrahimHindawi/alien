@@ -125,6 +125,26 @@ VsOut vs_bolt(VsMesh v, float4 inst : INSTANCE0)
     return o;
 }
 
+// Gems: slot 1 is float4(x, z, value, 0). Spinning green crystals, bigger when merged.
+VsOut vs_gem(VsMesh v, float4 inst : INSTANCE0)
+{
+    float time = camera_pos.w;
+    float a = time * 2.6 + inst.x * 0.37 + inst.y * 0.71;
+    float s, c;
+    sincos(a, s, c);
+    float scale = 0.30 + 0.20 * saturate(log2(inst.z / 3.0) * 0.35);
+    float3 p = v.pos * scale;
+    p = float3(p.x * c - p.z * s, p.y, p.x * s + p.z * c);
+    float3 wp = p + float3(inst.x, 0.45 + 0.12 * sin(a * 1.3), inst.y);
+    VsOut o;
+    o.clip = mul(float4(wp, 1.0), view_proj);
+    o.world = wp;
+    o.normal = float3(p.x * c - p.z * s, 0.5, p.x * s + p.z * c);
+    o.color = float4(0.10, 0.75, 0.25, 1.0);
+    o.extra = float4(0.0, 0.0, 1.0, 0.0);
+    return o;
+}
+
 // Particles: slot 1 is float4(x, y, z, scale); the mesh is centred on its origin.
 VsOut vs_particle(VsMesh v, float4 inst : INSTANCE0)
 {
@@ -450,7 +470,9 @@ float4 ps_composite(PostOut i) : SV_Target
     float2 d = i.uv - 0.5;
     c *= 1.0 - dot(d, d) * 0.75;                 // vignette
     // damage: the edges bleed red as health runs out
-    float hurt = (1.0 - game.y) * game.x;
+    float hurt = saturate(1.0 - game.y) * game.x;
     c = lerp(c, float3(0.5, 0.0, 0.02), saturate(dot(d, d) * 3.0) * hurt * hurt * 0.8);
+    // level up: a green-white flash from the edges
+    c += float3(0.3, 1.0, 0.5) * game.z * game.z * saturate(dot(d, d) * 2.5) * 0.8;
     return float4(c, 1.0);
 }

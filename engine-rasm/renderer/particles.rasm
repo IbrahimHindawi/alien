@@ -123,6 +123,7 @@ shard:
     jmp event
 done:
     mov death_count, 0
+    mov game_death_seen, 0             ; the game layer has read them already
     movaps xmm6, xmmword ptr [rsp + 32]
     movaps xmm7, xmmword ptr [rsp + 48]
     add rsp, 64

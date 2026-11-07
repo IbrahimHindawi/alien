@@ -20,7 +20,10 @@ k_hud_pip_h: const f32 = 10.0
 k_dash_cd: const f32 = 45.0
 k_pulse_cd: const f32 = 240.0
 k_bomb_cd: const f32 = 480.0
-k_hud_kills_x: const f32 = -150.0
+k_hud_kills_x: const f32 = -220.0
+k_hud_xp_h: const f32 = 6.0
+k_hud_lv_x: const f32 = 140.0
+col_xp: [4]const f32[align(16)] = { 0.25, 1.0, 0.45, 1.0 }
 
 ; ecx: line number of the overlay -> xmm0 x, xmm1 y, xmm2 size for small text
 hud_line: proc(line: u32) = {
@@ -131,9 +134,59 @@ hud_draw: proc() = {
     lea rcx, ui_text_buf
     lea rdx, col_text
     call ui_text
-    ; --- kills, top centre ----------------------------------------------------
+    ; --- XP bar along the top edge, level and time -----------------------------
+    cmp game_on, 0
+    je no_xp
+        vxorps xmm0, xmm0, xmm0
+        vxorps xmm1, xmm1, xmm1
+        vmovss xmm2, frame_cb.screen[0]
+        vmovss xmm3, k_hud_xp_h
+        mov eax, game_xp
+        vcvtsi2ss xmm4, xmm4, eax
+        mov eax, game_xp_next
+        vcvtsi2ss xmm5, xmm5, eax
+        vdivss xmm4, xmm4, xmm5
+        lea rcx, col_xp
+        call ui_bar
+        call ui_str_clear
+        invoke(ui_str_cat, "LV ")
+        mov ecx, game_level
+        call ui_str_u32
+        vmovss xmm0, frame_cb.screen[0]
+        vsubss xmm0, xmm0, k_hud_lv_x
+        vmovss xmm1, k_hud_x
+        vmovss xmm2, k_hud_mid
+        lea rcx, ui_text_buf
+        lea rdx, col_xp
+        call ui_text
+    no_xp:
+    ; --- kills and time, top centre ----------------------------------------------
     call ui_str_clear
-    invoke(ui_str_cat, "KILLS ")
+    mov eax, sim_tick
+    xor edx, edx
+    mov ecx, 60
+    div ecx                            ; seconds
+    xor edx, edx
+    mov ecx, 60
+    div ecx                            ; eax minutes, edx seconds
+    push rdx
+    sub rsp, 8
+    mov ecx, eax
+    call ui_str_u32
+    invoke(ui_str_cat, ":")
+    add rsp, 8
+    pop rdx
+    cmp edx, 10
+    jae two_digits
+        push rdx
+        sub rsp, 8
+        invoke(ui_str_cat, "0")
+        add rsp, 8
+        pop rdx
+    two_digits:
+    mov ecx, edx
+    call ui_str_u32
+    invoke(ui_str_cat, "   KILLS ")
     mov ecx, kills
     call ui_str_u32
     vmovss xmm0, frame_cb.screen[0]
@@ -159,7 +212,7 @@ hud_draw: proc() = {
     vmovss xmm2, k_hud_bar_w
     vmovss xmm3, k_hud_bar_h
     vmovss xmm4, hero_hp
-    vdivss xmm4, xmm4, k_hud_100
+    vdivss xmm4, xmm4, hero_hp_max
     lea rcx, col_red
     call ui_bar
     vmovss xmm0, k_hud_x
@@ -182,7 +235,8 @@ hud_draw: proc() = {
     vmovss dword ptr [rsp + 48], xmm1
     lea rcx, hud_dash_label
     mov edx, dash_cd
-    vmovss xmm3, k_dash_cd
+    mov eax, g_dash_cd
+    vcvtsi2ss xmm3, xmm3, eax
     call hud_pip
     vmovss xmm0, k_hud_x
     vaddss xmm0, xmm0, k_hud_pip_w
@@ -190,7 +244,8 @@ hud_draw: proc() = {
     vmovss xmm1, dword ptr [rsp + 48]
     lea rcx, hud_pulse_label
     mov edx, pulse_cd
-    vmovss xmm3, k_pulse_cd
+    mov eax, g_pulse_cd
+    vcvtsi2ss xmm3, xmm3, eax
     call hud_pip
     vmovss xmm0, k_hud_pip_w
     vaddss xmm0, xmm0, k_hud_x
@@ -199,7 +254,8 @@ hud_draw: proc() = {
     vmovss xmm1, dword ptr [rsp + 48]
     lea rcx, hud_bomb_label
     mov edx, bomb_cd
-    vmovss xmm3, k_bomb_cd
+    mov eax, g_bomb_cd
+    vcvtsi2ss xmm3, xmm3, eax
     call hud_pip
     ; --- death ----------------------------------------------------------------
     cmp hero_alive, 0
@@ -225,6 +281,10 @@ hud_draw: proc() = {
     lea rdx, col_text
     call ui_text
 alive:
+    cmp game_choosing, 0
+    je no_cards
+        call game_draw_cards
+    no_cards:
     call ui_flush
     movaps xmm6, xmmword ptr [rsp + 32]
     add rsp, 64

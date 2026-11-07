@@ -492,6 +492,9 @@ instance:
     call post_init
     test eax, eax
     jz failed
+    call gems_init
+    test eax, eax
+    jz failed
     invoke(arena_reset, arena_frame&)
     mov eax, 1
     jmp done
@@ -871,6 +874,7 @@ next_lod:
     ; projectiles: the unit pipeline with the bolt mesh
     call render_fx
     call render_particles
+    call render_gems
     ; hero
     cmp hero_alive, 0
     je no_hero
@@ -969,7 +973,7 @@ render_fill_effects: proc() = {
     vcvtsi2ss xmm0, xmm0, eax
     vmovss frame_cb.game[0], xmm0
     vmovss xmm0, hero_hp
-    vmulss xmm0, xmm0, k_hp_full
+    vdivss xmm0, xmm0, hero_hp_max
     vmovss frame_cb.game[1], xmm0
     mov eax, beam_on
     vcvtsi2ss xmm0, xmm0, eax

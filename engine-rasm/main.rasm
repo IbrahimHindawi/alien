@@ -31,6 +31,7 @@ import "renderer/ui.rasm"
 import "renderer/ring_table.rasm"
 import "gameplay/hero.rasm"
 import "gameplay/hud.rasm"
+import "gameplay/progress.rasm"
 import "tests/tests.rasm"
 
 ; 768 MiB reserved and committed for the run
@@ -243,17 +244,27 @@ run_start: proc() = {
     cmp eax, opt_entities
     cmova eax, opt_entities
     mov target_count, eax
+    cmp game_on, 0
+    je no_game
+        call game_reset
+    no_game:
     add rsp, 40
     ret
 }
 
-; Per tick, before sim_step: target = min(--entities, RUN_START + tick * RUN_GROWTH / 60)
+; Per tick, before sim_step: the swarm snowballs,
+; target = min(--entities, RUN_START + s * RUN_GROWTH + 3 s^2 / 2) with s the seconds survived
 run_escalate: proc() = {
     mov eax, sim_tick
-    imul eax, eax, RUN_GROWTH
     xor edx, edx
     mov ecx, 60
-    div ecx
+    div ecx                            ; s
+    mov ecx, eax
+    imul ecx, eax                      ; s^2
+    lea ecx, [rcx + rcx*2]
+    shr ecx, 1                         ; 3 s^2 / 2
+    imul eax, eax, RUN_GROWTH
+    add eax, ecx
     add eax, RUN_START
     cmp eax, opt_entities
     cmova eax, opt_entities
@@ -273,11 +284,13 @@ run_game: proc() -> i32 = {
     call render_init
     test eax, eax
     jz failed
+    mov game_on, 1                     ; the progression layer (never in --bench-sim or --test)
     cmp opt_spawn_set, 0
     je escalating
         mov ecx, opt_entities          ; --spawn-half: a stress scene, all at once
         mov edx, opt_seed
         call sim_init
+        call game_reset
         mov run_escalation, 0
         jmp started
     escalating:
@@ -332,11 +345,19 @@ frame:
         jb count
         mov tick_accum, 0              ; too far behind: drop the backlog
     ticks_known:
+    call game_input
+    cmp game_choosing, 0
+    je not_choosing
+        xor esi, esi                   ; an upgrade pick is open: the world waits
+        mov tick_accum, 0
+    not_choosing:
     call clock_ticks
     mov rdi, rax
 simulate:
     test esi, esi
     jz simulated
+    cmp game_choosing, 0
+    jne simulated
     cmp run_escalation, 0
     je fixed_population
         call run_escalate
@@ -369,6 +390,7 @@ simulate:
     vmovss sim_aim_z, xmm0
     call sim_step
     stepped:
+    call game_tick
     vmovss xmm0, render_time
     vaddss xmm0, xmm0, k_tick_seconds
     vmovss render_time, xmm0
@@ -380,6 +402,7 @@ simulated:
     add stats_sim_qpc, rax
     call camera_update
     call hero_update_matrix
+    call game_frame
     call render_frame
     mov rax, render_instance_cycles
     add stats_inst_cycles, rax
