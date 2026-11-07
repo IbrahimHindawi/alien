@@ -120,6 +120,10 @@ group:
     ; +0.0f (dx = dz = 0) and one hit; lanes past the group are never stored.
     mov r9d, 3
 fast_row:
+    ; the state before this row, in case a lane reaches the cap in it
+    vmovaps ymm12, ymm2
+    vmovaps ymm13, ymm3
+    vmovdqa ymm15, ymm4
     cmp edi, GRID_DIM
     jae fast_next_row
     mov ecx, edi
@@ -151,20 +155,32 @@ fast_candidate:
     cmp r8d, r10d
     jb fast_candidate
 fast_next_row:
-    inc edi
-    dec r9d
-    jnz fast_row
-    ; any lane over the cap (hits - itself > 16)? then redo the group exactly
-    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap17
+    ; a lane past 16 hits in this row (itself included: a safe over-count)
+    ; may have met the cap: redo this row, and the rest, exactly from the state
+    ; before it
+    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap
     vpand ymm6, ymm6, ymm5
     vmovmskps eax, ymm6
     test eax, eax
-    jz separated
-    mov dword ptr [rsp + 232], 1
-    mov edi, dword ptr [rsp + 236]
-    vxorps ymm2, ymm2, ymm2
-    vxorps ymm3, ymm3, ymm3
-    vpxor ymm4, ymm4, ymm4
+    jnz row_exact
+    inc edi
+    dec r9d
+    jnz fast_row
+    jmp separated
+row_exact:
+    vmovaps ymm2, ymm12
+    vmovaps ymm3, ymm13
+    vmovdqa ymm4, ymm15
+    cmp r9d, 1
+    jne own_row_ahead
+    vpcmpeqd ymm6, ymm6, ymm6          ; the third row: each lane met itself in the second
+    vpaddd ymm4, ymm4, ymm6
+own_row_ahead:
+    vmovdqa ymm15, ymmword ptr k_sep_cap
+    vmovd xmm13, esi                   ; the lanes' slots, for the self test
+    vpbroadcastd ymm13, xmm13
+    vpaddd ymm13, ymm13, ymmword ptr k_iota
+    jmp row
 exact:
     mov r9d, 3
 row:
@@ -192,6 +208,8 @@ candidate:
     vpcmpeqd ymm12, ymm12, ymm13                   ; the lane itself
     vpandn ymm11, ymm12, ymm11
     vpcmpgtd ymm12, ymm15, ymm4                    ; fewer than 16 hits so far
+    vptest ymm12, ymm5
+    jz separated                       ; every lane has its 16: nothing more can change
     vpand ymm11, ymm11, ymm12
     vpand ymm11, ymm11, ymm5
     vsubps ymm10, ymm14, ymm10                     ; w = 1 - d2
@@ -208,13 +226,6 @@ next_row:
     inc edi
     dec r9d
     jnz row
-    ; keep going exact while groups reach the cap
-    vpcmpeqd ymm6, ymm4, ymm15
-    vpand ymm6, ymm6, ymm5
-    vmovmskps eax, ymm6
-    test eax, eax
-    jnz separated
-    mov dword ptr [rsp + 232], 0
 separated:
     ; integrate the group's own entities now (spec 4.4, the operations of
     ; sim_integrate in the same order): positions to the spare columns, as
