@@ -294,9 +294,46 @@ row:
     add ecx, r11d
     mov r8d, dword ptr [r15 + rcx*4]   ; the row's run of the window
     mov r10d, dword ptr [r15 + rdx*4]
+    ; the run in three parts: before the group's own slots and after them no
+    ; candidate is a lane itself (no self test, w masked once: missed and
+    ; garbage lanes add +-0.0f); the group's own slots, at most 8, get the test
+    mov eax, esi
+    cmp eax, r10d
+    cmova eax, r10d                    ; the end of the part before
+    mov dword ptr [rsp + 228], eax
+ex_before:
+    cmp r8d, dword ptr [rsp + 228]
+    jae ex_own_start
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vpcmpgtd ymm12, ymm15, ymm4
+    vptest ymm12, ymm5
+    jz separated
+    vpand ymm11, ymm11, ymm12
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    inc r8d
+    jmp ex_before
+ex_own_start:
+    mov eax, esi
+    add eax, dword ptr [rsp + 224]
+    cmp eax, r10d
+    cmova eax, r10d                    ; the end of the group's own slots
+    mov dword ptr [rsp + 228], eax
 candidate:
-    cmp r8d, r10d
-    jae next_row
+    cmp r8d, dword ptr [rsp + 228]
+    jae ex_after
     vbroadcastss ymm6, dword ptr [r12 + r8*4]
     vbroadcastss ymm7, dword ptr [r13 + r8*4]
     vsubps ymm8, ymm0, ymm6                        ; dx = px - x
@@ -324,6 +361,31 @@ candidate:
     vpsubd ymm4, ymm4, ymm11                       ; hit lanes are -1
     inc r8d
     jmp candidate
+ex_after:
+ex_after_loop:
+    cmp r8d, r10d
+    jae next_row
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vpcmpgtd ymm12, ymm15, ymm4
+    vptest ymm12, ymm5
+    jz separated
+    vpand ymm11, ymm11, ymm12
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    inc r8d
+    jmp ex_after_loop
 next_row:
     inc edi
     dec r9d
