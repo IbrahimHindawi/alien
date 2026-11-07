@@ -169,6 +169,14 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_cell2, rax
+    invoke(arena_push, arena_perm&, (GRID_CELLS + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_mcount, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 8)
+    test rax, rax
+    jz failed
+    mov sim_mkey, rax
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed

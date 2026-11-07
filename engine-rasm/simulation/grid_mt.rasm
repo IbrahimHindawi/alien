@@ -52,6 +52,10 @@ grid_fuse_now: u32 = 0                  ; this build fuses per band (the populat
 grid_windowed_ticks: u32 = 0
 grid_windowed: u32 = 0                  ; this build counts from row windows (no bin, no bucket)
 grid_count_error: u32 = 0
+#define MERGE_FEW 256
+k_shift1: [8]const u32[align(32)] = { 0, 0, 1, 2, 3, 4, 5, 6 }
+sim_mcount: *u32 = 0                    ; GRID_CELLS: per band region, the movers' cell starts
+sim_mkey: *u64 = 0                      ; MAX_ENTITIES: the sorted movers' keys
 k_bcast3: [8]const u32[align(32)] = { 3, 3, 3, 3, 3, 3, 3, 3 }
 k_bcast7: [8]const u32[align(32)] = { 7, 7, 7, 7, 7, 7, 7, 7 }
 k_upper_half: [8]const u32[align(32)] = { 0, 0, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF }
@@ -210,7 +214,7 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     push r14
     push r15
     push rbp
-    sub rsp, 40                        ; [rsp] base, [+4] n, [+8] end, [+12] old lo, [+16] old hi, [+24] lo cell
+    sub rsp, 72                        ; [rsp] base, [+4] n, [+8] end, [+12] old lo, [+16] old hi, [+24] lo cell, [+40..] the merge's state
     mov ebx, r8d
     mov r9d, ebx
     shl r9d, BAND_SHIFT                ; lo cell
@@ -408,6 +412,8 @@ counted_move:
     vmovdqa ymm5, ymmword ptr k_bcast3
     vmovdqa ymm3, ymmword ptr k_upper_half
     xor eax, eax
+    cmp grid_windowed, 0
+    jne prefix_excl
 prefix:
     vmovdqu ymm0, ymmword ptr [rdi + rax*4]
     vpslldq ymm2, ymm0, 4
@@ -423,7 +429,274 @@ prefix:
     add eax, 8
     cmp eax, BAND_CELLS
     jb prefix
+    jmp prefixed
+prefix_excl:
+    ; (windowed: exclusive, the cells' starts directly)
+    vmovdqu ymm0, ymmword ptr [rdi + rax*4]
+    vpslldq ymm2, ymm0, 4
+    vpaddd ymm0, ymm0, ymm2
+    vpslldq ymm2, ymm0, 8
+    vpaddd ymm0, ymm0, ymm2
+    vpermd ymm2, ymm5, ymm0
+    vpand ymm2, ymm2, ymm3
+    vpaddd ymm0, ymm0, ymm2
+    vpaddd ymm0, ymm0, ymm1
+    vpsubd ymm2, ymm0, ymmword ptr [rdi + rax*4]   ; minus the counts: the starts
+    vmovdqu ymmword ptr [rdi + rax*4], ymm2
+    vpermd ymm1, ymm4, ymm0
+    add eax, 8
+    cmp eax, BAND_CELLS
+    jb prefix_excl
+prefixed:
     vzeroupper
+    ; ---------------------------------------------------------------------
+    ; windowed: the merge build. Stayers keep their old order, which is
+    ; already (cell, seq) order; the movers, sorted by (cell, seq), are merged
+    ; in. The output is written once, in order: no slot ids, no gather.
+    cmp grid_windowed, 0
+    je place_full
+    ; A. (the prefix wrote the cells' starts)
+    ; B. the movers by (cell, seq). Few movers: keys in list order, then one
+    ; insertion sort. Many: counted per cell in the band's region of
+    ; sim_mcount, placed by exclusive start, then insertion by seq in each cell
+    lea rax, mov_band_off
+    mov eax, dword ptr [rax + rbx*4]
+    mov rdx, sim_slot_id
+    lea r13, [rdx + rax*4]             ; S: the sorted movers' storage indices
+    mov rdx, sim_mkey
+    lea r14, [rdx + rax*8]             ; K: their keys (cell << 32 | seq)
+    cmp r15d, MERGE_FEW
+    jae many_movers
+    mov r11, sim_seq
+    xor ecx, ecx
+few_keys:
+    cmp ecx, r15d
+    jae mplaced
+    mov eax, dword ptr [rbp + rcx*4]
+    mov dword ptr [r13 + rcx*4], eax
+    mov edx, dword ptr [r8 + rax*4]
+    shl rdx, 32
+    mov eax, dword ptr [r11 + rax*4]
+    or rdx, rax
+    mov qword ptr [r14 + rcx*8], rdx
+    inc ecx
+    jmp few_keys
+many_movers:
+    mov r11, sim_mcount
+    lea rdi, [r11 + r9*4]
+    vpxor ymm0, ymm0, ymm0
+    mov ecx, BAND_CELLS / 8
+mzero:
+    vmovdqu ymmword ptr [rdi], ymm0
+    add rdi, 32
+    dec ecx
+    jnz mzero
+    xor ecx, ecx
+mcount:
+    cmp ecx, r15d
+    jae mcounted
+    mov eax, dword ptr [rbp + rcx*4]
+    mov edx, dword ptr [r8 + rax*4]
+    inc dword ptr [r11 + rdx*4]
+    inc ecx
+    jmp mcount
+mcounted:
+    ; exclusive prefix over the band's 8192 counters (only cells with movers matter)
+    lea rdi, [r11 + r9*4]
+    xor edx, edx
+    xor ecx, ecx
+mprefix:
+    mov eax, dword ptr [rdi + rcx*4]
+    mov dword ptr [rdi + rcx*4], edx
+    add edx, eax
+    inc ecx
+    cmp ecx, BAND_CELLS
+    jb mprefix
+    ; place into the sorted region (slot ids at the band's mover offset) with keys
+    xor ecx, ecx
+mplace:
+    cmp ecx, r15d
+    jae mplaced
+    mov eax, dword ptr [rbp + rcx*4]   ; storage index
+    mov edx, dword ptr [r8 + rax*4]    ; cell
+    mov edi, dword ptr [r11 + rdx*4]
+    inc dword ptr [r11 + rdx*4]
+    mov dword ptr [r13 + rdi*4], eax
+    mov r10, sim_seq
+    mov r10d, dword ptr [r10 + rax*4]
+    shl rdx, 32
+    or rdx, r10
+    mov qword ptr [r14 + rdi*8], rdx
+    inc ecx
+    jmp mplace
+mplaced:
+    ; insertion by key (runs are per cell: short)
+    mov ecx, 1
+msort:
+    cmp ecx, r15d
+    jae msorted
+    mov rdx, qword ptr [r14 + rcx*8]
+    mov eax, dword ptr [r13 + rcx*4]
+    mov edi, ecx
+mshift:
+    test edi, edi
+    jz mput
+    cmp qword ptr [r14 + rdi*8 - 8], rdx
+    jbe mput
+    mov r10, qword ptr [r14 + rdi*8 - 8]
+    mov qword ptr [r14 + rdi*8], r10
+    mov r10d, dword ptr [r13 + rdi*4 - 4]
+    mov dword ptr [r13 + rdi*4], r10d
+    dec edi
+    jmp mshift
+mput:
+    mov qword ptr [r14 + rdi*8], rdx
+    mov dword ptr [r13 + rdi*4], eax
+    inc ecx
+    jmp msort
+msorted:
+    ; C. merge the old range's stayers with the sorted movers
+    mov r10, sim_slot_cell
+    mov ebx, dword ptr [rsp]           ; w: the next output slot
+    mov r12d, dword ptr [rsp + 12]     ; i: the old block
+    xor edx, edx                       ; k: the next mover
+    mov dword ptr [rsp + 40], edx
+    mov rsi, -1                        ; the next mover's key (none: max)
+    test r15d, r15d
+    jz merge_blocks
+    mov rsi, qword ptr [r14]
+merge_blocks:
+    mov eax, dword ptr [rsp + 16]
+    sub eax, r12d
+    jbe merge_tail
+    ; stayers of the block: new cell = old cell, lanes before the old range's end
+    vmovdqu ymm0, ymmword ptr [r8 + r12*4]
+    vpcmpeqd ymm1, ymm0, ymmword ptr [r10 + r12*4]
+    vmovmskps edi, ymm1
+    cmp eax, 8
+    jae merge_full
+        bzhi edi, edi, eax
+    merge_full:
+    test edi, edi
+    jz merge_next
+    ; the block's last stayer before the next mover? then pack it whole
+    bsr eax, edi
+    lea ecx, [r12 + rax]
+    mov eax, dword ptr [r8 + rcx*4]
+    shl rax, 32
+    mov r11, sim_seq
+    mov r11d, dword ptr [r11 + rcx*4]
+    or rax, r11
+    cmp rax, rsi
+    jae merge_lanes
+    ; left-pack: lane indices of the stayers, packed low (pdep/pext)
+    mov eax, edi
+    mov rcx, 0x0101010101010101
+    pdep rcx, rax, rcx
+    imul rcx, rcx, 255
+    mov rax, 0x0706050403020100
+    pext rax, rax, rcx
+    vmovq xmm3, rax
+    vpmovzxbd ymm3, xmm3
+    popcnt ecx, edi
+    mov dword ptr [rsp + 44], ecx
+    shl ecx, 5
+    lea rax, k_lane_valid
+    vmovdqa ymm4, ymmword ptr [rax + rcx]          ; the packed lanes only
+    mov r11, sim_pos_x
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_pos_x2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    mov r11, sim_pos_z
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_pos_z2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    mov r11, sim_vel_x
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_vel_x2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    mov r11, sim_vel_z
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_vel_z2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    mov r11, sim_hp
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_hp2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    mov r11, sim_seq
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_seq2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    vpermd ymm1, ymm3, ymm0
+    mov r11, sim_slot_cell2
+    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+    add ebx, dword ptr [rsp + 44]
+    jmp merge_next
+merge_lanes:
+    ; lane by lane: movers whose key comes first, then the stayer
+    mov dword ptr [rsp + 48], edi
+merge_lane:
+    mov edi, dword ptr [rsp + 48]
+    test edi, edi
+    jz merge_next
+    tzcnt eax, edi
+    blsr edi, edi
+    mov dword ptr [rsp + 48], edi
+    lea r9d, [r12 + rax]               ; the stayer's storage index
+    mov eax, dword ptr [r8 + r9*4]
+    shl rax, 32
+    mov r11, sim_seq
+    mov r11d, dword ptr [r11 + r9*4]
+    or rax, r11
+    mov qword ptr [rsp + 56], rax
+lane_movers:
+    cmp rsi, qword ptr [rsp + 56]
+    jae lane_stayer
+    call merge_emit_mover
+    jmp lane_movers
+lane_stayer:
+    mov r11, sim_pos_x
+    vmovd xmm0, dword ptr [r11 + r9*4]
+    mov r11, sim_pos_x2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_pos_z
+    vmovd xmm0, dword ptr [r11 + r9*4]
+    mov r11, sim_pos_z2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_vel_x
+    vmovd xmm0, dword ptr [r11 + r9*4]
+    mov r11, sim_vel_x2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_vel_z
+    vmovd xmm0, dword ptr [r11 + r9*4]
+    mov r11, sim_vel_z2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_hp
+    vmovd xmm0, dword ptr [r11 + r9*4]
+    mov r11, sim_hp2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_seq
+    vmovd xmm0, dword ptr [r11 + r9*4]
+    mov r11, sim_seq2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov eax, dword ptr [r8 + r9*4]
+    mov r11, sim_slot_cell2
+    mov dword ptr [r11 + rbx*4], eax
+    inc ebx
+    jmp merge_lane
+merge_next:
+    add r12d, 8
+    jmp merge_blocks
+merge_tail:
+    ; the movers after every stayer
+    cmp rsi, -1
+    je merged
+    call merge_emit_mover
+    jmp merge_tail
+merged:
+    vzeroupper
+    jmp gathered_b
+place_full:
     ; stayers, descending: they end each cell's run, in (cell, seq) order
     mov r11, sim_slot_id
     mov r14, sim_slot_cell2
@@ -588,7 +861,7 @@ gathered_b:
     mov edx, dword ptr [rsi + rax*4 + 4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
     call sim_separate_v4
 not_fused:
-    add rsp, 40
+    add rsp, 72
     pop rbp
     pop r15
     pop r14
@@ -597,6 +870,51 @@ not_fused:
     pop rdi
     pop rsi
     pop rbx
+    ret
+}
+
+; Inside grid_band_job's merge (its frame: k at [rsp + 8 + 40]): emit mover k
+; to slot rbx, advance k and its key in rsi. r13: the sorted storage indices,
+; r14: their keys, r15d: the movers' count.
+merge_emit_mover: proc() = {
+    mov edx, dword ptr [rsp + 48]      ; k (the caller's [rsp + 40])
+    mov ecx, dword ptr [r13 + rdx*4]   ; storage index
+    mov r11, sim_pos_x
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, sim_pos_x2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_pos_z
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, sim_pos_z2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_vel_x
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, sim_vel_x2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_vel_z
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, sim_vel_z2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_hp
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, sim_hp2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_seq
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, sim_seq2
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov rax, rsi
+    shr rax, 32
+    mov r11, sim_slot_cell2
+    mov dword ptr [r11 + rbx*4], eax
+    inc ebx
+    inc edx
+    mov dword ptr [rsp + 48], edx
+    mov rsi, -1
+    cmp edx, r15d
+    jae done
+    mov rsi, qword ptr [r14 + rdx*8]
+done:
     ret
 }
 

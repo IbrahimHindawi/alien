@@ -392,3 +392,19 @@ the rest negligible) led to:
 |---|---:|---:|---:|---:|---:|---:|
 | now | 1184 | 134 | 10753 | 1118 | 27989 | 2883 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
+
+## 2026-11-07: the merge build (kept)
+
+- **Profile** (uProf, 16 threads, line level): in the band job the scalar
+  per-slot gather (11.3 s of 30.1) and the stayer placement (6.6 s) were most
+  of the build.
+- **Change** (windowed builds, as the C rival builds rows): the prefix writes
+  the cells' starts directly; the movers are sorted by (cell, seq) (an
+  insertion sort when a band has fewer than 256, else counted per cell in
+  `sim_mcount` and then insertion by seq within each cell); then the old
+  range is streamed in blocks of 8: when a block's last stayer comes before
+  the next mover, its stayers are left-packed (a `pdep`/`pext` permutation)
+  and the seven columns stored at once; otherwise lane by lane. The output is
+  written once, in order: no slot ids, no order repair, no gather.
+- **Correctness**: every reference and recorded hash at 1 and 16 threads; a
+  guard-page run.
