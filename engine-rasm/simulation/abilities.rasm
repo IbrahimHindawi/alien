@@ -55,6 +55,148 @@ k_bomb_r2: const f32 = 144.0
 k_bomb_damage: const f32 = 4.0
 k_bomb_push: const f32 = 40.0
 
+; The cells an effect can reach this tick (start-of-tick grid, so widened by
+; the tick's largest move): only their entities are visited. An entity
+; outside cannot meet any effect's test, and the effects are per entity, so
+; the result is the spec's.
+area_x0: u32 = 0
+area_x1: u32 = 0
+area_z0: u32 = 0
+area_z1: u32 = 0
+area_lo_x: f32 = 0.0
+area_hi_x: f32 = 0.0
+area_lo_z: f32 = 0.0
+area_hi_z: f32 = 0.0
+k_area_big: const f32 = 1.0e9
+k_area_margin: const f32 = 1.0
+k_beam_reach: const f32 = 1.0          ; >= sqrt(BEAM_W2) = 0.8
+
+; Union of the active effects' boxes -> area_x0..x1, area_z0..z1 (cells, clamped).
+area_bounds: proc() = {
+    vmovss xmm0, k_area_big
+    vxorps xmm1, xmm1, xmm1
+    vsubss xmm1, xmm1, xmm0
+    vmovss area_lo_x, xmm0
+    vmovss area_lo_z, xmm0
+    vmovss area_hi_x, xmm1
+    vmovss area_hi_z, xmm1
+    cmp fx_pulse, 0
+    je no_pulse
+        vsqrtss xmm2, xmm2, fx_r1sq                ; r1
+        vmovss xmm0, pulse_cx
+        vmovss xmm1, pulse_cz
+        call area_add_disc
+    no_pulse:
+    cmp beam_on, 0
+    je no_beam
+        vmovss xmm2, k_beam_reach
+        vmovss xmm0, hero_x
+        vmovss xmm1, hero_z
+        call area_add_disc
+        vmovss xmm0, beam_ux
+        vmulss xmm0, xmm0, k_beam_len
+        vaddss xmm0, xmm0, hero_x
+        vmovss xmm1, beam_uz
+        vmulss xmm1, xmm1, k_beam_len
+        vaddss xmm1, xmm1, hero_z
+        vmovss xmm2, k_beam_reach
+        call area_add_disc
+    no_beam:
+    cmp fx_bomb, 0
+    je no_bomb
+        vmovss xmm2, k_bomb_r
+        vmovss xmm0, bomb_x
+        vmovss xmm1, bomb_z
+        call area_add_disc
+    no_bomb:
+    ; widen by the tick's largest move and a margin, then to cells
+    vmovd xmm2, grid_maxdisp
+    vaddss xmm2, xmm2, k_area_margin
+    vmovss xmm0, area_lo_x
+    vsubss xmm0, xmm0, xmm2
+    call area_cell
+    mov area_x0, eax
+    vmovss xmm0, area_hi_x
+    vaddss xmm0, xmm0, xmm2
+    call area_cell
+    mov area_x1, eax
+    vmovss xmm0, area_lo_z
+    vsubss xmm0, xmm0, xmm2
+    call area_cell
+    mov area_z0, eax
+    vmovss xmm0, area_hi_z
+    vaddss xmm0, xmm0, xmm2
+    call area_cell
+    mov area_z1, eax
+    ret
+}
+
+; xmm0 x, xmm1 z, xmm2 radius: grow the box to hold the disc's square
+area_add_disc: proc() = {
+    vsubss xmm3, xmm0, xmm2
+    vminss xmm3, xmm3, area_lo_x
+    vmovss area_lo_x, xmm3
+    vaddss xmm3, xmm0, xmm2
+    vmaxss xmm3, xmm3, area_hi_x
+    vmovss area_hi_x, xmm3
+    vsubss xmm3, xmm1, xmm2
+    vminss xmm3, xmm3, area_lo_z
+    vmovss area_lo_z, xmm3
+    vaddss xmm3, xmm1, xmm2
+    vmaxss xmm3, xmm3, area_hi_z
+    vmovss area_hi_z, xmm3
+    ret
+}
+
+; xmm0: a world coordinate -> eax: its cell column (or row), clamped to the grid
+area_cell: proc() = {
+    vmaxss xmm0, xmm0, k_lo[0]
+    vminss xmm0, xmm0, k_hi[0]
+    vaddss xmm0, xmm0, k_world_half[0]
+    vmulss xmm0, xmm0, k_inv_cell[0]
+    vcvttss2si eax, xmm0
+    xor ecx, ecx
+    test eax, eax
+    cmovs eax, ecx
+    mov ecx, GRID_DIM - 1
+    cmp eax, ecx
+    cmova eax, ecx
+    ret
+}
+
+; ecx: first row, edx: one past the last (relative to area_z0): each row's
+; run of the box's cells is one slot range of grid-ordered storage
+area_rows_job: proc(begin: u32, end: u32, chunk: u32) = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    mov ebx, ecx
+    mov edi, edx
+row:
+    cmp ebx, edi
+    jae done
+    mov eax, area_z0
+    add eax, ebx
+    shl eax, GRID_SHIFT
+    mov rsi, sim_cell_start
+    mov edx, eax
+    add edx, area_x0
+    mov ecx, dword ptr [rsi + rdx*4]
+    mov edx, eax
+    add edx, area_x1
+    mov edx, dword ptr [rsi + rdx*4 + 4]
+    call area_job
+    inc ebx
+    jmp row
+done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
 ; tunables (see combat.rasm): spec values, reset by sim_init
 g_dash_cd: u32 = DASH_CD
 g_pulse_cd: u32 = PULSE_CD
@@ -219,16 +361,19 @@ sim_abilities: proc() = {
     or eax, beam_on
     or eax, fx_bomb
     jz none
-    mov rcx, area_job&
-    mov edx, sim_count
-    mov r8d, AREA_CHUNK
+    call area_bounds
+    mov edx, area_z1
+    sub edx, area_z0
+    inc edx                            ; rows
+    mov rcx, area_rows_job&
+    mov r8d, 2
     call pool_dispatch
 none:
     add rsp, 40
     ret
 }
 
-; ecx: first entity (a multiple of 8), edx: one past the last
+; ecx: first slot, edx: one past the last (any slots: the tail is masked)
 area_job: proc(begin: u32, end: u32, chunk: u32) = {
     push rsi
     push rdi
@@ -245,19 +390,16 @@ area_job: proc(begin: u32, end: u32, chunk: u32) = {
     mov r10, sim_vel_x
     mov r11, sim_vel_z
     mov rsi, sim_hp
-    mov eax, ecx
-    sub edx, ecx
-    add edx, 7
-    shr edx, 3                         ; blocks
-    shl rax, 2
-    test edx, edx
-    jz done
+    mov eax, ecx                       ; slot
+    mov edi, edx                       ; end
 block:
-    vmovaps ymm0, ymmword ptr [r8 + rax]           ; px
-    vmovaps ymm1, ymmword ptr [r9 + rax]           ; pz
-    vmovaps ymm2, ymmword ptr [r10 + rax]          ; vx
-    vmovaps ymm3, ymmword ptr [r11 + rax]          ; vz
-    vmovaps ymm4, ymmword ptr [rsi + rax]          ; hp
+    cmp eax, edi
+    jae done
+    vmovups ymm0, ymmword ptr [r8 + rax*4]         ; px
+    vmovups ymm1, ymmword ptr [r9 + rax*4]         ; pz
+    vmovups ymm2, ymmword ptr [r10 + rax*4]        ; vx
+    vmovups ymm3, ymmword ptr [r11 + rax*4]        ; vz
+    vmovups ymm4, ymmword ptr [rsi + rax*4]        ; hp
     cmp fx_pulse, 0
     je no_pulse
         vbroadcastss ymm5, pulse_cx
@@ -352,12 +494,26 @@ block:
         vaddps ymm6, ymm3, ymm6
         vblendvps ymm3, ymm3, ymm6, ymm9
     no_bomb:
-    vmovaps ymmword ptr [r10 + rax], ymm2
-    vmovaps ymmword ptr [r11 + rax], ymm3
-    vmovaps ymmword ptr [rsi + rax], ymm4
-    add rax, 32
-    dec edx
-    jnz block
+    ; a block past the range's end writes only its own lanes: the next range
+    ; may belong to another thread
+    mov ecx, edi
+    sub ecx, eax
+    cmp ecx, 8
+    jb partial
+    vmovups ymmword ptr [r10 + rax*4], ymm2
+    vmovups ymmword ptr [r11 + rax*4], ymm3
+    vmovups ymmword ptr [rsi + rax*4], ymm4
+    jmp stored
+partial:
+    shl ecx, 5
+    lea rdx, k_lane_valid
+    vmovdqa ymm5, ymmword ptr [rdx + rcx]
+    vmaskmovps ymmword ptr [r10 + rax*4], ymm5, ymm2
+    vmaskmovps ymmword ptr [r11 + rax*4], ymm5, ymm3
+    vmaskmovps ymmword ptr [rsi + rax*4], ymm5, ymm4
+stored:
+    add eax, 8
+    jmp block
 done:
     vzeroupper
     movaps xmm6, xmmword ptr [rsp]
