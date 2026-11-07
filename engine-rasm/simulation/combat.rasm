@@ -511,6 +511,21 @@ retry:
     mov dword ptr [rax + rcx*4], edx
     mov rax, sim_slot_cell
     mov dword ptr [rax + rcx*4], -1    ; no old cell: a mover at the next build
+    vaddss xmm0, xmm6, k_world_half[0]
+    vmulss xmm0, xmm0, k_inv_cell[0]
+    vcvttss2si eax, xmm0
+    vaddss xmm0, xmm7, k_world_half[0]
+    vmulss xmm0, xmm0, k_inv_cell[0]
+    vcvttss2si edx, xmm0
+    shl edx, GRID_SHIFT
+    add eax, edx                       ; its cell
+    mov rdx, sim_cell
+    mov dword ptr [rdx + rcx*4], eax
+    shr eax, BAND_SHIFT
+    lea rdx, next_band_total
+    inc dword ptr [rdx + rax*4]
+    lea rdx, next_mov_total
+    inc dword ptr [rdx + rax*4]
     inc sim_next_seq
     inc sim_count
     inc sim_alive

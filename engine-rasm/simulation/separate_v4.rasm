@@ -18,6 +18,10 @@ fz_vel_x: *f32 = 0
 fz_vel_z: *f32 = 0
 fz_out_x: *f32 = 0
 fz_out_z: *f32 = 0
+fz_cell: *u32 = 0                      ; the next build's cell of each slot (written here)
+fz_slot_cell: *u32 = 0                 ; the slots' cells as of this build (the next one's old cells)
+next_band_total: [128]u32 = {}         ; the next build's members and movers per band
+next_mov_total: [128]u32 = {}
 grid_maxdisp: u32 = 0                  ; the largest |move| on one axis this tick (f32 bits, >= 0)
 k_abs: [8]const u32[align(32)] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF }
 
@@ -31,7 +35,7 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     push r13
     push r14
     push r15
-    sub rsp, 280                       ; 8 + 64 + 280 = 352; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes, [rsp + 240] largest move
+    sub rsp, 1336                      ; 8 + 64 + 1336 = 1408; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes, [rsp + 240] largest move, [rsp + 288] band counts, [rsp + 800] mover counts
     movaps xmmword ptr [rsp + 64], xmm6
     movaps xmmword ptr [rsp + 80], xmm7
     movaps xmmword ptr [rsp + 96], xmm8
@@ -50,6 +54,13 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     mov esi, ecx                       ; s: the group's first slot
     vxorps xmm0, xmm0, xmm0
     vmovups ymmword ptr [rsp + 240], ymm0
+    lea rax, [rsp + 288]
+    mov edx, 32
+zero_counts:
+    vmovups ymmword ptr [rax], ymm0
+    add rax, 32
+    dec edx
+    jnz zero_counts
     vbroadcastss ymm14, k_one[0]
     vmovdqa ymm15, ymmword ptr k_sep_cap
 group:
@@ -194,6 +205,35 @@ next_row:
     vandps ymm10, ymm10, ymm5
     vmaxps ymm10, ymm10, ymmword ptr [rsp + 240]
     vmovups ymmword ptr [rsp + 240], ymm10
+    ; the lanes' new cells for the next build: per slot, and counted per band
+    ; (members, and movers against the slot's cell as of this build)
+    vaddps ymm10, ymm8, ymmword ptr k_world_half
+    vmulps ymm10, ymm10, ymmword ptr k_inv_cell
+    vcvttps2dq ymm10, ymm10
+    vaddps ymm11, ymm9, ymmword ptr k_world_half
+    vmulps ymm11, ymm11, ymmword ptr k_inv_cell
+    vcvttps2dq ymm11, ymm11
+    vpslld ymm11, ymm11, GRID_SHIFT
+    vpaddd ymm10, ymm10, ymm11
+    vmovdqu ymmword ptr [rsp], ymm10
+    mov ecx, dword ptr [rsp + 224]
+    mov r14, fz_cell
+    mov r11, fz_slot_cell
+    xor edx, edx
+cell_lane:
+    mov eax, dword ptr [rsp + rdx*4]
+    lea r8d, [rsi + rdx]
+    mov dword ptr [r14 + r8*4], eax
+    mov edi, eax
+    shr edi, BAND_SHIFT
+    inc dword ptr [rsp + rdi*4 + 288]
+    cmp eax, dword ptr [r11 + r8*4]
+    je cell_stays
+    inc dword ptr [rsp + rdi*4 + 800]
+cell_stays:
+    inc edx
+    cmp edx, ecx
+    jb cell_lane
     mov r11, fz_out_x
     mov r8, fz_out_z
     mov ecx, dword ptr [rsp + 224]
@@ -229,6 +269,24 @@ publish:
     lock cmpxchg grid_maxdisp, edx
     jnz publish
 published:
+    ; this call's counts into the next build's totals
+    xor ecx, ecx
+merge:
+    mov eax, dword ptr [rsp + rcx*4 + 288]
+    test eax, eax
+    jz merged_band
+    lea rdx, next_band_total
+    lock add dword ptr [rdx + rcx*4], eax
+merged_band:
+    mov eax, dword ptr [rsp + rcx*4 + 800]
+    test eax, eax
+    jz merged_mover
+    lea rdx, next_mov_total
+    lock add dword ptr [rdx + rcx*4], eax
+merged_mover:
+    inc ecx
+    cmp ecx, 128
+    jb merge
     vzeroupper
     movaps xmm6, xmmword ptr [rsp + 64]
     movaps xmm7, xmmword ptr [rsp + 80]
@@ -240,7 +298,7 @@ published:
     movaps xmm13, xmmword ptr [rsp + 176]
     movaps xmm14, xmmword ptr [rsp + 192]
     movaps xmm15, xmmword ptr [rsp + 208]
-    add rsp, 280
+    add rsp, 1336
     pop r15
     pop r14
     pop r13

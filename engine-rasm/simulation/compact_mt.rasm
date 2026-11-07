@@ -98,6 +98,23 @@ block:
 dead:
     tzcnt ecx, r12d
     blsr r12d, r12d
+    ; the next build will not have it: no cell, out of its band's counts
+    lea eax, [rsi + rcx]
+    mov r13, sim_cell
+    mov edx, dword ptr [r13 + rax*4]
+    cmp edx, -1
+    je uncounted
+    mov dword ptr [r13 + rax*4], -1
+    mov r8d, edx
+    shr r8d, BAND_SHIFT
+    lea r13, next_band_total
+    lock dec dword ptr [r13 + r8*4]
+    mov r13, sim_slot_cell
+    cmp edx, dword ptr [r13 + rax*4]
+    je uncounted
+    lea r13, next_mov_total
+    lock dec dword ptr [r13 + r8*4]
+uncounted:
     cmp ebx, DEATH_EVENTS_MAX
     jae counted
     lea eax, [rsi + rcx]

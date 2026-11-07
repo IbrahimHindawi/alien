@@ -288,3 +288,23 @@ and bucket passes.
 - **Measured** (16 threads): 1M sparse 2390 -> 2301 us, 100k 375 -> 360; the
   window scan costs about what bin and bucket did. **Kept** (one barrier
   fewer per tick, the structure the remaining work builds on).
+
+## 2026-11-07: the fused integration computes the next build's cells (kept)
+
+- **Change**: as the fused integration writes new positions it also writes
+  each slot's new cell (a spare cell column) and counts members and movers
+  per band (per-call histograms, merged with atomic adds); deaths take their
+  entity out of the counts, spawns put theirs in. The next build reads the
+  totals directly: no count pass over the population, one barrier fewer.
+  Each band job collects its movers from its own old rows widened by the
+  tick's largest move, then counts. A self-check flags any disagreement
+  between the integration's counts and a band's (zero in every bench run).
+- **Correctness**: every reference hash; the contest's recorded hashes.
+
+| 16 threads | before us/tick | after |
+|---|---:|---:|
+| 100k sparse | 359 | 281..295 |
+| 1M sparse | 2231 | 1868..1921 |
+| 1M dense | 4451 | 3546..3717 |
+
+**Kept.**

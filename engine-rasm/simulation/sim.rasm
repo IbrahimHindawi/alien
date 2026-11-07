@@ -43,6 +43,7 @@ sim_sorted_id: *u32 = 0
 #define ORDER_MAP_MAX 4194304
 sim_seq: *u32 = 0
 sim_next_seq: u32 = 0
+sim_cell2: *u32 = 0                    ; the next build's cells, written by the fused integration
 sim_slot_cell: *u32 = 0                ; cell of each slot, written by the grid build
 sim_slot_id: *u32 = 0                  ; storage index of each slot, the grid build's scratch
 sim_identity: *u32 = 0                 ; i at i: the id view of grid-ordered storage
@@ -164,6 +165,10 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_slot_cell2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_cell2, rax
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed

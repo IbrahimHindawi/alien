@@ -51,10 +51,9 @@ grid_fuse: u32 = 0                      ; 1: also separate and integrate (sim_st
 grid_fuse_now: u32 = 0                  ; this build fuses per band (the population is spread out)
 grid_windowed_ticks: u32 = 0
 grid_windowed: u32 = 0                  ; this build counts from row windows (no bin, no bucket)
+grid_count_error: u32 = 0
 grid_built_n: u32 = 0                   ; slots sorted by the last build; spawns follow them
 grid_d_rows: u32 = 0                    ; rows any entity can have moved since the last build
-win_ra: [GRID_BANDS]u32 = {}            ; each band's window of old slots
-win_rb: [GRID_BANDS]u32 = {}
 k_disp_rows: const f32 = 0.5            ; a cell is 2 m
 #define WINDOW_MAX_ROWS 4
 #define WINDOW_MAX_TAIL 4096
@@ -217,8 +216,6 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     ; zero arr[lo + 1 .. lo + BAND_CELLS] (and arr[0] for band 0)
     lea rdi, [rsi + r9*4 + 4]
     xor eax, eax
-    cmp grid_windowed, 0
-    jne zeroed                         ; the window count pass left the counters
     mov ecx, BAND_CELLS
     rep stosd
     test ebx, ebx
@@ -252,13 +249,33 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     mov r8, sim_cell
     cmp grid_windowed, 0
     je full_counts
-    ; windowed: counted already; the movers come from the band's window of
-    ; old slots and the spawns after them, ascending
+    ; windowed: the movers come from the band's old rows widened by the
+    ; largest move, and from the spawns after the sorted slots, ascending
+    mov eax, ebx
+    shl eax, 3                         ; the band's first row
+    mov edx, eax
+    sub eax, grid_d_rows
+    xor ecx, ecx
+    test eax, eax
+    cmovs eax, ecx
+    add edx, BAND_ROWS
+    add edx, grid_d_rows
+    mov ecx, GRID_DIM
+    cmp edx, ecx
+    cmova edx, ecx
+    shl eax, GRID_SHIFT
+    shl edx, GRID_SHIFT
+    mov dword ptr [rsp + 28], edx
+    mov r11d, grid_old_count
+    mov ecx, eax
+    call band_lower_bound
+    mov dword ptr [rsp + 32], eax
+    mov ecx, dword ptr [rsp + 28]
+    call band_lower_bound
+    mov edx, eax
+    mov ecx, dword ptr [rsp + 32]
+    mov r8, sim_cell
     xor edi, edi
-    lea rax, win_ra
-    mov ecx, dword ptr [rax + rbx*4]
-    lea rax, win_rb
-    mov edx, dword ptr [rax + rbx*4]
 collect_window:
     cmp ecx, edx
     jae collected_window
@@ -279,7 +296,7 @@ collected_window:
     mov edx, grid_old_count
 collect_tail:
     cmp ecx, edx
-    jae counted_move
+    jae collected_tail
     mov eax, dword ptr [r8 + rcx*4]
     mov r13d, eax
     sub r13d, r9d
@@ -290,6 +307,11 @@ collect_tail:
 next_tail:
     inc ecx
     jmp collect_tail
+collected_tail:
+    cmp edi, r15d
+    je full_counts
+    mov grid_count_error, 1            ; the integration's counts disagree: a bug
+    mov r15d, edi
 full_counts:
     ; count stayers (new cell = old cell) and movers
     mov ecx, dword ptr [rsp + 12]
@@ -454,127 +476,6 @@ not_fused:
     ret
 }
 
-; r8d: band. Windowed count: the band's new members can only come from its
-; old rows widened by grid_d_rows, or from the spawns after the sorted slots.
-; Their cells are computed (and written: overlapping windows write the same
-; values), counted per cell, and the band's members and movers totalled.
-grid_window_job: proc(begin: u32, end: u32, band: u32) = {
-    push rbx
-    push rsi
-    push rdi
-    push r12
-    push r13
-    push r14
-    push r15
-    push rbp
-    sub rsp, 40                        ; [rsp] tail flag
-    mov ebx, r8d
-    mov r9d, ebx
-    shl r9d, BAND_SHIFT                ; lo cell
-    mov rsi, sim_cell_arr
-    lea rdi, [rsi + r9*4 + 4]
-    xor eax, eax
-    mov ecx, BAND_CELLS
-    rep stosd
-    test ebx, ebx
-    jnz zeroed
-        mov dword ptr [rsi], 0
-    zeroed:
-    ; window rows [band rows - d, band rows + d), clamped, as old cells
-    mov eax, ebx
-    shl eax, 3                         ; first row (BAND_ROWS = 8)
-    mov edx, eax
-    sub eax, grid_d_rows
-    xor ecx, ecx
-    test eax, eax
-    cmovs eax, ecx
-    add edx, BAND_ROWS
-    add edx, grid_d_rows
-    mov ecx, GRID_DIM
-    cmp edx, ecx
-    cmova edx, ecx
-    shl eax, GRID_SHIFT
-    shl edx, GRID_SHIFT
-    mov r12d, edx
-    mov r10, sim_slot_cell
-    mov r11d, grid_built_n
-    mov ecx, eax
-    call band_lower_bound
-    lea rcx, win_ra
-    mov dword ptr [rcx + rbx*4], eax
-    mov r13d, eax
-    mov ecx, r12d
-    call band_lower_bound
-    lea rcx, win_rb
-    mov dword ptr [rcx + rbx*4], eax
-    mov r14d, eax
-    ; scan the window, then the tail
-    mov r12, sim_pos_x
-    mov r15, sim_pos_z
-    mov rdi, sim_hp
-    mov r8, sim_cell
-    xor ebp, ebp                       ; members
-    xor r11d, r11d                     ; movers
-    vxorps xmm3, xmm3, xmm3
-    mov ecx, r13d
-    mov edx, r14d
-    mov dword ptr [rsp], 0
-scan:
-    cmp ecx, edx
-    jae scanned
-    vmovss xmm0, dword ptr [rdi + rcx*4]
-    vcomiss xmm0, xmm3
-    jbe dead
-    vmovss xmm0, dword ptr [r12 + rcx*4]
-    vaddss xmm0, xmm0, k_world_half[0]
-    vmulss xmm0, xmm0, k_inv_cell[0]
-    vcvttss2si eax, xmm0
-    vmovss xmm1, dword ptr [r15 + rcx*4]
-    vaddss xmm1, xmm1, k_world_half[0]
-    vmulss xmm1, xmm1, k_inv_cell[0]
-    vcvttss2si r13d, xmm1
-    shl r13d, GRID_SHIFT
-    add eax, r13d                      ; the new cell
-    mov dword ptr [r8 + rcx*4], eax
-    mov r13d, eax
-    sub r13d, r9d
-    cmp r13d, BAND_CELLS
-    jae next
-    inc dword ptr [rsi + rax*4 + 4]
-    inc ebp
-    cmp eax, dword ptr [r10 + rcx*4]
-    je next
-    inc r11d
-    jmp next
-dead:
-    mov dword ptr [r8 + rcx*4], -1
-next:
-    inc ecx
-    jmp scan
-scanned:
-    cmp dword ptr [rsp], 0
-    jne done
-    mov dword ptr [rsp], 1
-    mov ecx, grid_built_n
-    mov edx, grid_old_count
-    jmp scan
-done:
-    lea rax, band_total
-    mov dword ptr [rax + rbx*4], ebp
-    lea rax, mov_band_total
-    mov dword ptr [rax + rbx*4], r11d
-    add rsp, 40
-    pop rbp
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rdi
-    pop rsi
-    pop rbx
-    ret
-}
-
 ; r8d: band. The band's first and last rows, after every band is built.
 grid_edge_job: proc(begin: u32, end: u32, band: u32) = {
     push rbx
@@ -628,6 +529,10 @@ sim_grid_mt: proc() = {
     mov fz_out_x, rax
     mov rax, sim_pos3_z
     mov fz_out_z, rax
+    mov rax, sim_cell2
+    mov fz_cell, rax
+    mov rax, sim_slot_cell2
+    mov fz_slot_cell, rax
     ; rows anyone can have moved since the last build (a cell is 2 m)
     vmovd xmm0, grid_maxdisp
     vmulss xmm0, xmm0, k_disp_rows
@@ -651,10 +556,21 @@ sim_grid_mt: proc() = {
     ja full_build
     mov grid_windowed, 1
     inc grid_windowed_ticks
-    mov rcx, grid_window_job&
-    mov edx, GRID_BANDS
-    mov r8d, 1
-    call pool_dispatch
+    ; this build's members and movers per band, counted by the last tick's
+    ; integration, deaths and spawns
+    xor ecx, ecx
+take_counts:
+    lea rax, next_band_total
+    mov edx, dword ptr [rax + rcx*4]
+    lea rax, band_total
+    mov dword ptr [rax + rcx*4], edx
+    lea rax, next_mov_total
+    mov edx, dword ptr [rax + rcx*4]
+    lea rax, mov_band_total
+    mov dword ptr [rax + rcx*4], edx
+    inc ecx
+    cmp ecx, GRID_BANDS
+    jb take_counts
     ; band bases and mover lists from the window counts
     xor edx, edx
     xor esi, esi
@@ -775,6 +691,14 @@ mchunks_done:
     add grid_stage_cyc[8], rcx
     mov qword ptr [rsp + 24], rax
 bands_ready:
+    ; this build's integration counts for the next one
+    xor eax, eax
+    lea rdi, next_band_total
+    mov ecx, GRID_BANDS
+    rep stosd
+    lea rdi, next_mov_total
+    mov ecx, GRID_BANDS
+    rep stosd
     mov rcx, grid_band_job&
     mov edx, GRID_BANDS
     mov r8d, 1
@@ -847,6 +771,11 @@ separated:
     mov rcx, sim_pos3_z
     mov sim_pos_z, rcx
     mov sim_pos3_z, rax
+    ; and its cells are the next build's
+    mov rax, sim_cell
+    mov rcx, sim_cell2
+    mov sim_cell, rcx
+    mov sim_cell2, rax
 unfused:
     mov rax, sim_pos_x
     mov sim_sorted_x, rax
