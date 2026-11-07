@@ -490,46 +490,39 @@ next_mover:
     inc ecx
     jmp order
 ordered:
-    ; gather, three columns per pass
+    ; gather the six live columns into slot order in one pass (the slot ids
+    ; are read once; values move through xmm0, so twelve pointers fit)
     mov rbx, sim_pos_x
     mov rsi, sim_pos_x2
     mov rdi, sim_pos_z
     mov rbp, sim_pos_z2
     mov r8, sim_vel_x
     mov r9, sim_vel_x2
+    mov r10, sim_vel_z
+    mov r12, sim_vel_z2
+    mov r13, sim_hp
+    mov r14, sim_hp2
+    mov r15, sim_seq
+    mov rdx, sim_seq2
     mov ecx, dword ptr [rsp]
-gather_a:
-    cmp ecx, dword ptr [rsp + 8]
-    jae gathered_a
-    mov eax, dword ptr [r11 + rcx*4]
-    mov edx, dword ptr [rbx + rax*4]
-    mov dword ptr [rsi + rcx*4], edx
-    mov edx, dword ptr [rdi + rax*4]
-    mov dword ptr [rbp + rcx*4], edx
-    mov edx, dword ptr [r8 + rax*4]
-    mov dword ptr [r9 + rcx*4], edx
-    inc ecx
-    jmp gather_a
-gathered_a:
-    mov rbx, sim_vel_z
-    mov rsi, sim_vel_z2
-    mov rdi, sim_hp
-    mov rbp, sim_hp2
-    mov r8, sim_seq
-    mov r9, sim_seq2
-    mov ecx, dword ptr [rsp]
-gather_b:
+gather:
     cmp ecx, dword ptr [rsp + 8]
     jae gathered_b
     mov eax, dword ptr [r11 + rcx*4]
-    mov edx, dword ptr [rbx + rax*4]
-    mov dword ptr [rsi + rcx*4], edx
-    mov edx, dword ptr [rdi + rax*4]
-    mov dword ptr [rbp + rcx*4], edx
-    mov edx, dword ptr [r8 + rax*4]
-    mov dword ptr [r9 + rcx*4], edx
+    vmovd xmm0, dword ptr [rbx + rax*4]
+    vmovd dword ptr [rsi + rcx*4], xmm0
+    vmovd xmm0, dword ptr [rdi + rax*4]
+    vmovd dword ptr [rbp + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r8 + rax*4]
+    vmovd dword ptr [r9 + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r10 + rax*4]
+    vmovd dword ptr [r12 + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r13 + rax*4]
+    vmovd dword ptr [r14 + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r15 + rax*4]
+    vmovd dword ptr [rdx + rcx*4], xmm0
     inc ecx
-    jmp gather_b
+    jmp gather
 gathered_b:
     ; fused: the band's interior rows (lo + 1 .. lo + 6) need only the band's
     ; own rows, which this thread has just written: separate and integrate
