@@ -465,3 +465,14 @@ medians (5 rounds each). Every hash checked.
 
 The assembly engine is faster than clang's in one cell, level in two, and
 behind in three: the dense crowd and 1M at 16 threads.
+
+## 2026-11-07: exact loop in three parts (kept); sticky exact (discarded)
+
+The exact (capped) loop splits each row's run at the group's own slots: before
+and after them no candidate is a lane, so no self test (and `w` masked once).
+Dense 1M one thread 26.4 -> 25.0 ms (interleaved A/B). Restoring the sticky
+flag (a group after a capped one starts exact) made dense worse (25.0 ->
+26.4): redoing only the row that reaches the cap beats redoing whole groups.
+
+Duel, interleaved, loaded machine: 100k 1T 1.03, 100k 16T 1.35 (asm ahead);
+1M 1T 0.97, 1M 16T 0.82, dense 1T 0.91, dense 16T 0.79 (C ahead).
