@@ -288,24 +288,86 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     call band_lower_bound
     mov edx, eax
     mov ecx, dword ptr [rsp + 32]
+    mov dword ptr [rsp + 36], edx      ; the window's end
+    ; the old cell sizes first (from the last build's starts, still in the
+    ; counters): the pass below takes the leavers out of them
+    lea rdi, [rsi + r9*4 + 4]
+    mov eax, BAND_CELLS / 8 - 1
+win_sizes:
+    vmovdqu ymm0, ymmword ptr [rdi]
+    vmovdqu ymm1, ymmword ptr [rdi + 4]
+    vpsubd ymm1, ymm1, ymm0
+    vmovdqu ymmword ptr [rdi], ymm1
+    add rdi, 32
+    dec eax
+    jnz win_sizes
+    vmovdqu ymm0, ymmword ptr [rdi]
+    vmovdqu ymm1, ymmword ptr [rdi + 4]
+    vmovd xmm2, dword ptr [rsp + 16]
+    vpbroadcastd ymm2, xmm2
+    vpblendd ymm1, ymm1, ymm2, 0x80
+    vpsubd ymm1, ymm1, ymm0
+    vmovdqu ymmword ptr [rdi], ymm1
+    ; one pass over the window, 8 slots per step: movers into the band (new
+    ; cell in it, not the old one) are listed; leavers (old cell in it, not
+    ; the new one) leave their old cell's count
     mov r8, sim_cell
+    vmovd xmm5, r9d
+    vpbroadcastd ymm5, xmm5            ; lo
+    vpcmpeqd ymm4, ymm4, ymm4
+    vpsrld ymm4, ymm4, 32 - BAND_SHIFT ; BAND_CELLS - 1
     xor edi, edi
 collect_window:
-    cmp ecx, edx
-    jae collected_window
-    mov eax, dword ptr [r8 + rcx*4]
-    mov r13d, eax
-    sub r13d, r9d
-    cmp r13d, BAND_CELLS
-    jae next_window                    ; another band, or dead (-1)
-    cmp eax, dword ptr [r10 + rcx*4]
-    je next_window                     ; a stayer
-    mov dword ptr [rbp + rdi*4], ecx
+    mov eax, dword ptr [rsp + 36]
+    sub eax, ecx
+    jbe collected_window
+    mov edx, 255
+    cmp eax, 8
+    jae win_full
+        bzhi edx, edx, eax
+    win_full:
+    mov dword ptr [rsp + 20], edx      ; valid lanes
+    vmovdqu ymm0, ymmword ptr [r8 + rcx*4]         ; new cells
+    vmovdqu ymm1, ymmword ptr [r10 + rcx*4]        ; old cells
+    vpcmpeqd ymm2, ymm0, ymm1                      ; stayers
+    vpsubd ymm3, ymm0, ymm5
+    vpminud ymm0, ymm3, ymm4
+    vpcmpeqd ymm0, ymm0, ymm3                      ; new cell in the band
+    vpandn ymm0, ymm2, ymm0
+    vmovmskps eax, ymm0
+    and eax, edx
+    vpsubd ymm3, ymm1, ymm5
+    vpminud ymm1, ymm3, ymm4
+    vpcmpeqd ymm1, ymm1, ymm3                      ; old cell in the band
+    vpandn ymm1, ymm2, ymm1
+    vmovmskps edx, ymm1
+    and edx, dword ptr [rsp + 20]
+    test eax, eax
+    jz win_no_movers
+win_mover:
+    tzcnt r13d, eax
+    blsr eax, eax
+    add r13d, ecx
+    mov dword ptr [rbp + rdi*4], r13d
     inc edi
-next_window:
-    inc ecx
+    test eax, eax
+    jnz win_mover
+win_no_movers:
+    test edx, edx
+    jz win_next
+win_leaver:
+    tzcnt r13d, edx
+    blsr edx, edx
+    add r13d, ecx
+    mov r13d, dword ptr [r10 + r13*4]
+    dec dword ptr [rsi + r13*4 + 4]
+    test edx, edx
+    jnz win_leaver
+win_next:
+    add ecx, 8
     jmp collect_window
 collected_window:
+    vzeroupper
     mov ecx, grid_built_n
     mov edx, grid_old_count
 collect_tail:
@@ -323,9 +385,10 @@ next_tail:
     jmp collect_tail
 collected_tail:
     cmp edi, r15d
-    je full_counts
+    je counted_stay                    ; the stayers are counted: on to the movers
     mov grid_count_error, 1            ; the integration's counts disagree: a bug
     mov r15d, edi
+    jmp counted_stay
 full_counts:
     cmp grid_windowed, 0
     jne window_counts
