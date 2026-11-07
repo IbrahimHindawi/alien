@@ -141,10 +141,6 @@ group:
     ; +0.0f (dx = dz = 0) and one hit; lanes past the group are never stored.
     mov r9d, 3
 fast_row:
-    ; the state before this row, in case a lane reaches the cap in it
-    vmovaps ymm12, ymm2
-    vmovaps ymm13, ymm3
-    vmovdqa ymm15, ymm4
     cmp edi, GRID_DIM
     jae fast_next_row
     mov ecx, edi
@@ -173,6 +169,11 @@ fast_row:
     cmp r10d, eax
     jg fast_one
 fast_four:
+    ; the state before this step, in case a lane passes 16 in it
+    vmovaps ymm12, ymm2
+    vmovaps ymm13, ymm3
+    vmovdqa ymm15, ymm4
+    mov dword ptr [rsp + 228], r8d
     vbroadcastss ymm6, dword ptr [r12 + r8*4]
     vbroadcastss ymm7, dword ptr [r13 + r8*4]
     vsubps ymm8, ymm0, ymm6
@@ -233,11 +234,20 @@ fast_four:
     vaddps ymm2, ymm2, ymm8
     vaddps ymm3, ymm3, ymm9
     vpsubd ymm4, ymm4, ymm11
+    ; a lane past 16 hits (itself included: a safe over-count) may have met
+    ; the cap: redo from this step's start, exactly
+    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap
+    vptest ymm6, ymm5
+    jnz step_exact
     add r8d, 4
     cmp r8d, r10d
     jb fast_four
     jmp fast_next_row
 fast_one:
+    vmovaps ymm12, ymm2
+    vmovaps ymm13, ymm3
+    vmovdqa ymm15, ymm4
+    mov dword ptr [rsp + 228], r8d
     vbroadcastss ymm6, dword ptr [r12 + r8*4]
     vbroadcastss ymm7, dword ptr [r13 + r8*4]
     vsubps ymm8, ymm0, ymm6
@@ -253,22 +263,45 @@ fast_one:
     vaddps ymm2, ymm2, ymm8
     vaddps ymm3, ymm3, ymm9
     vpsubd ymm4, ymm4, ymm11
+    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap
+    vptest ymm6, ymm5
+    jnz step_exact
     inc r8d
     cmp r8d, r10d
     jb fast_one
 fast_next_row:
-    ; a lane past 16 hits in this row (itself included: a safe over-count)
-    ; may have met the cap: redo this row, and the rest, exactly from the state
-    ; before it
-    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap
-    vpand ymm6, ymm6, ymm5
-    vmovmskps eax, ymm6
-    test eax, eax
-    jnz row_exact
     inc edi
     dec r9d
     jnz fast_row
     jmp separated
+step_exact:
+    vmovaps ymm2, ymm12
+    vmovaps ymm3, ymm13
+    vmovdqa ymm4, ymm15
+    mov r8d, dword ptr [rsp + 228]     ; this step's first candidate
+    ; the fast count included each lane's own slot once met: rows before the
+    ; lanes' row (cz) have not met it, rows after have; in that row, lanes
+    ; whose slot is before this candidate have
+    mov eax, dword ptr [rsp + 236]
+    inc eax                            ; cz
+    cmp edi, eax
+    jb step_counts
+    vpcmpeqd ymm6, ymm6, ymm6
+    ja step_seen
+    vmovd xmm6, r8d
+    vpbroadcastd ymm6, xmm6
+    vmovd xmm7, esi
+    vpbroadcastd ymm7, xmm7
+    vpaddd ymm7, ymm7, ymmword ptr k_iota
+    vpcmpgtd ymm6, ymm6, ymm7          ; candidate > the lane's slot: met
+step_seen:
+    vpaddd ymm4, ymm4, ymm6
+step_counts:
+    vmovdqa ymm15, ymmword ptr k_sep_cap
+    vmovd xmm13, esi
+    vpbroadcastd ymm13, xmm13
+    vpaddd ymm13, ymm13, ymmword ptr k_iota
+    jmp row_resume
 row_exact:
     vmovaps ymm2, ymm12
     vmovaps ymm3, ymm13
@@ -294,6 +327,7 @@ row:
     add ecx, r11d
     mov r8d, dword ptr [r15 + rcx*4]   ; the row's run of the window
     mov r10d, dword ptr [r15 + rdx*4]
+row_resume:
     ; the run in three parts: before the group's own slots and after them no
     ; candidate is a lane itself (no self test, w masked once: missed and
     ; garbage lanes add +-0.0f); the group's own slots, at most 8, get the test
