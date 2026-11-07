@@ -445,76 +445,7 @@ done:
     ret
 }
 
-; deaths ---------------------------------------------------------------------------
-
-; Stable compaction of every entity with hp > 0.
-sim_compact: proc() = {
-    push rbx
-    push rsi
-    push rdi
-    push r12
-    push r13
-    push r14
-    sub rsp, 40                        ; 8 + 48 + 40 = 96
-    mov r8, sim_pos_x
-    mov r9, sim_pos_z
-    mov r10, sim_vel_x
-    mov r11, sim_vel_z
-    mov r12, sim_hp
-    mov r13d, sim_count
-    xor ecx, ecx                       ; read
-    xor edx, edx                       ; write
-    vxorps xmm1, xmm1, xmm1
-again:
-    cmp ecx, r13d
-    jae done
-    vmovss xmm0, dword ptr [r12 + rcx*4]
-    vcomiss xmm0, xmm1
-    jbe dead_event
-    cmp ecx, edx
-    je kept                            ; nothing removed yet: no copy
-    vmovss dword ptr [r12 + rdx*4], xmm0
-    mov eax, dword ptr [r8 + rcx*4]
-    mov dword ptr [r8 + rdx*4], eax
-    mov eax, dword ptr [r9 + rcx*4]
-    mov dword ptr [r9 + rdx*4], eax
-    mov eax, dword ptr [r10 + rcx*4]
-    mov dword ptr [r10 + rdx*4], eax
-    mov eax, dword ptr [r11 + rcx*4]
-    mov dword ptr [r11 + rdx*4], eax
-kept:
-    inc edx
-    inc ecx
-    jmp again
-dead_event:
-    ; an output for the renderer's death shards; not simulation state
-    mov r14d, death_count
-    cmp r14d, DEATH_EVENTS_MAX
-    jae dead
-    mov eax, dword ptr [r8 + rcx*4]
-    lea rbx, death_x
-    mov dword ptr [rbx + r14*4], eax
-    mov eax, dword ptr [r9 + rcx*4]
-    lea rbx, death_z
-    mov dword ptr [rbx + r14*4], eax
-    inc death_count
-dead:
-    inc ecx
-    jmp again
-done:
-    mov eax, r13d
-    sub eax, edx
-    add kills, eax
-    mov sim_count, edx
-    add rsp, 40
-    pop r14
-    pop r13
-    pop r12
-    pop rdi
-    pop rsi
-    pop rbx
-    ret
-}
+; deaths: sim_compact_mt (compact_mt.rasm) ----------------------------------------
 
 ; spawning ---------------------------------------------------------------------------
 
@@ -595,7 +526,7 @@ sim_combat: proc() = {
     call sim_projectiles
     call sim_abilities
     call sim_contact
-    call sim_compact
+    call sim_compact_mt
     call sim_spawn
     add rsp, 40
     ret

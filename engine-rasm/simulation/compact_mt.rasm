@@ -1,0 +1,284 @@
+; simulation/compact_mt.rasm: removing the dead (spec 4.5 Deaths), on the pool
+;
+; Stable compaction of pos, vel and hp, out of place:
+;
+;   count     (chunks)        survivors per chunk (8 lanes per compare, popcnt)
+;   offsets   (main thread)   exclusive prefixes of survivors and of deaths
+;   move      (chunks)        each block of 8 is packed by vpermps through the
+;                             compress table and stored at the chunk's write
+;                             cursor in the spare columns; deaths append their
+;                             positions to the death events at the chunk's rank
+;   swap      (main thread)   the spare columns become the live ones
+;
+; Survivors keep their order and the death events come out in ascending
+; entity order, as with the scalar sim_compact, so state and hashes are the
+; same. A tick without deaths moves nothing. A store that could reach past
+; the chunk's last output slot is masked, so chunks never write each other's
+; slots.
+
+#define CMP_CHUNK 16384
+#define CMP_SHIFT 14
+#define CMP_CHUNKS 64
+
+cmp_alive: [CMP_CHUNKS]u32 = {}
+cmp_off: [CMP_CHUNKS]u32 = {}
+cmp_doff: [CMP_CHUNKS]u32 = {}
+cmp_death_base: u32 = 0
+; the spare columns (allocated by sim_alloc)
+sim_pos_x2: *f32 = 0
+sim_pos_z2: *f32 = 0
+sim_vel_x2: *f32 = 0
+sim_vel_z2: *f32 = 0
+sim_hp2: *f32 = 0
+
+; ecx: begin (a multiple of 8), edx: end, r8d: chunk
+compact_count_job: proc(begin: u32, end: u32, chunk: u32) = {
+    mov r9, sim_hp
+    xor r10d, r10d
+    vxorps ymm5, ymm5, ymm5
+block:
+    cmp ecx, edx
+    jae done
+    vmovaps ymm1, ymmword ptr [r9 + rcx*4]
+    vcmpps ymm0, ymm1, ymm5, 30                    ; hp > 0 (GT_OQ)
+    vmovmskps eax, ymm0
+    mov r11d, edx
+    sub r11d, ecx
+    cmp r11d, 8
+    jae full
+        push rcx
+        mov ecx, r11d
+        mov r11d, 1
+        shl r11d, cl
+        dec r11d
+        and eax, r11d
+        pop rcx
+    full:
+    popcnt eax, eax
+    add r10d, eax
+    add ecx, 8
+    jmp block
+done:
+    lea rax, cmp_alive
+    mov dword ptr [rax + r8*4], r10d
+    vzeroupper
+    ret
+}
+
+; ecx: begin, edx: end, r8d: chunk
+compact_move_job: proc(begin: u32, end: u32, chunk: u32) = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    push rbp
+    mov esi, ecx                       ; i
+    mov edi, edx                       ; end
+    lea rax, cmp_off
+    mov ebx, dword ptr [rax + r8*4]    ; w: the next output slot
+    lea rax, cmp_alive
+    mov ebp, dword ptr [rax + r8*4]
+    add ebp, ebx                       ; the chunk's last output slot + 1
+    lea rax, cmp_doff
+    mov r15d, dword ptr [rax + r8*4]
+    add r15d, cmp_death_base           ; this chunk's first death event
+    vxorps ymm5, ymm5, ymm5
+block:
+    cmp esi, edi
+    jae done
+    mov r9, sim_hp
+    vmovaps ymm1, ymmword ptr [r9 + rsi*4]
+    vcmpps ymm0, ymm1, ymm5, 30                    ; hp > 0
+    vmovmskps r10d, ymm0
+    mov r11d, 255                                  ; valid lanes
+    mov eax, edi
+    sub eax, esi
+    cmp eax, 8
+    jae full
+        mov ecx, eax
+        mov r11d, 1
+        shl r11d, cl
+        dec r11d
+        and r10d, r11d
+    full:
+    ; deaths, ascending: their positions become death events
+    andn r12d, r10d, r11d
+    test r12d, r12d
+    jz no_dead
+dead:
+    tzcnt ecx, r12d
+    blsr r12d, r12d
+    cmp r15d, DEATH_EVENTS_MAX
+    jae counted
+    lea eax, [rsi + rcx]
+    mov r13, sim_pos_x
+    mov edx, dword ptr [r13 + rax*4]
+    lea r13, death_x
+    mov dword ptr [r13 + r15*4], edx
+    mov r13, sim_pos_z
+    mov edx, dword ptr [r13 + rax*4]
+    lea r13, death_z
+    mov dword ptr [r13 + r15*4], edx
+counted:
+    inc r15d
+    test r12d, r12d
+    jnz dead
+no_dead:
+    ; pack the survivors of the block
+    mov eax, r10d
+    shl eax, 5
+    lea rdx, k_compact_lut
+    vmovdqa ymm4, ymmword ptr [rdx + rax]
+    popcnt r12d, r10d
+    lea eax, [rbx + 8]
+    cmp eax, ebp
+    ja masked
+    mov r13, sim_pos_x
+    mov r14, sim_pos_x2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmovups ymmword ptr [r14 + rbx*4], ymm1
+    mov r13, sim_pos_z
+    mov r14, sim_pos_z2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmovups ymmword ptr [r14 + rbx*4], ymm1
+    mov r13, sim_vel_x
+    mov r14, sim_vel_x2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmovups ymmword ptr [r14 + rbx*4], ymm1
+    mov r13, sim_vel_z
+    mov r14, sim_vel_z2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmovups ymmword ptr [r14 + rbx*4], ymm1
+    mov r14, sim_hp2
+    vpermps ymm1, ymm4, ymmword ptr [r9 + rsi*4]
+    vmovups ymmword ptr [r14 + rbx*4], ymm1
+    jmp stored
+masked:
+    ; near the end of the chunk's output: write only the survivors' lanes
+    mov eax, r12d
+    shl eax, 5
+    lea rdx, k_lane_valid
+    vmovdqa ymm3, ymmword ptr [rdx + rax]
+    mov r13, sim_pos_x
+    mov r14, sim_pos_x2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
+    mov r13, sim_pos_z
+    mov r14, sim_pos_z2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
+    mov r13, sim_vel_x
+    mov r14, sim_vel_x2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
+    mov r13, sim_vel_z
+    mov r14, sim_vel_z2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
+    mov r14, sim_hp2
+    vpermps ymm1, ymm4, ymmword ptr [r9 + rsi*4]
+    vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
+stored:
+    add ebx, r12d
+    add esi, 8
+    jmp block
+done:
+    vzeroupper
+    pop rbp
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; The whole compaction; replaces sim_compact in sim_combat.
+sim_compact_mt: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    mov rcx, compact_count_job&
+    mov edx, sim_count
+    mov r8d, CMP_CHUNK
+    call pool_dispatch
+    ; prefixes of survivors and deaths, chunk by chunk
+    mov eax, sim_count
+    add eax, CMP_CHUNK - 1
+    shr eax, CMP_SHIFT
+    mov edi, eax                       ; chunks
+    xor ebx, ebx                       ; survivors so far
+    xor esi, esi                       ; deaths so far
+    xor ecx, ecx
+    lea r8, cmp_alive
+    lea r9, cmp_off
+    lea r10, cmp_doff
+prefix:
+    cmp ecx, edi
+    jae prefixed
+    mov dword ptr [r9 + rcx*4], ebx
+    mov dword ptr [r10 + rcx*4], esi
+    mov eax, ecx
+    shl eax, CMP_SHIFT
+    mov edx, sim_count
+    sub edx, eax
+    mov eax, CMP_CHUNK
+    cmp edx, eax
+    cmova edx, eax                     ; the chunk's length
+    mov eax, dword ptr [r8 + rcx*4]
+    add ebx, eax
+    sub edx, eax
+    add esi, edx
+    inc ecx
+    jmp prefix
+prefixed:
+    test esi, esi
+    jz done                            ; nobody died: nothing moves
+    mov eax, death_count
+    mov cmp_death_base, eax
+    mov rcx, compact_move_job&
+    mov edx, sim_count
+    mov r8d, CMP_CHUNK
+    call pool_dispatch
+    ; the packed columns become the live ones
+    mov rax, sim_pos_x
+    mov rcx, sim_pos_x2
+    mov sim_pos_x, rcx
+    mov sim_pos_x2, rax
+    mov rax, sim_pos_z
+    mov rcx, sim_pos_z2
+    mov sim_pos_z, rcx
+    mov sim_pos_z2, rax
+    mov rax, sim_vel_x
+    mov rcx, sim_vel_x2
+    mov sim_vel_x, rcx
+    mov sim_vel_x2, rax
+    mov rax, sim_vel_z
+    mov rcx, sim_vel_z2
+    mov sim_vel_z, rcx
+    mov sim_vel_z2, rax
+    mov rax, sim_hp
+    mov rcx, sim_hp2
+    mov sim_hp, rcx
+    mov sim_hp2, rax
+    add kills, esi
+    mov sim_count, ebx
+    mov eax, death_count
+    add eax, esi
+    mov ecx, DEATH_EVENTS_MAX
+    cmp eax, ecx
+    cmova eax, ecx
+    mov death_count, eax
+done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}

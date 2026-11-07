@@ -1,6 +1,6 @@
 ; renderer/particles.rasm: death shards (presentation only)
 ;
-; sim_compact appends the position of every alien that dies to death_events
+; sim_compact_mt appends the position of every alien that dies to death_events
 ; (an output of the simulation, not part of its state or hash). Each frame
 ; the events become PER_DEATH shards in a ring buffer of PART_MAX, with
 ; velocities from a render-side random stream (never the simulation's), then

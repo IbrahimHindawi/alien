@@ -130,6 +130,26 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_band_ids, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_pos_x2, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_pos_z2, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_vel_x2, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_vel_z2, rax
+    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    test rax, rax
+    jz failed
+    mov sim_hp2, rax
     mov eax, 1
     jmp done
 failed:

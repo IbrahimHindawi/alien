@@ -119,3 +119,26 @@ Grid at 1M, 16 threads: 12.3 -> 5.2 cycles/entity. **Kept.**
   47.0 cycles/entity (worse even branch-free), 1M dense 292 -> 298 (dense
   crowds reach the 16-neighbour cap early; the extra cells were not the cost).
   **Discarded.**
+
+## 2026-11-07: removing the dead in parallel (kept)
+
+- **Baseline**: combat was 4.48M cycles per tick at 1M on 16 threads, a
+  quarter of the tick, almost all of it `sim_compact`: scalar, one branch per
+  entity, and every entity after the first death copied one column at a time.
+- **Change** (`compact_mt.rasm`): survivors counted per chunk (8 lanes per
+  compare, popcnt); prefixes of survivors and deaths; each chunk packs its
+  blocks of 8 with `vpermps` through a 256-entry compress table
+  (`compact_lut.rasm`, generated) into spare columns at its own offset, the
+  last stores before the chunk's end masked so chunks never touch each
+  other's slots; the column pointers swap. A tick with no deaths moves
+  nothing. Death events come out in ascending entity order, as before.
+- **Correctness**: all reference hashes at 1 and 16 threads, guard pages on
+  and off.
+
+| 16 threads | combat cycles/tick | us/tick |
+|---|---|---|
+| 1M before | 4.48M | 4133 |
+| 1M after | 2.12M | 3779 |
+
+Single-threaded the full copy costs the same as the old partial scalar copy
+(4.46M). **Kept.**
