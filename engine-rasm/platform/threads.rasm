@@ -12,7 +12,7 @@
 ; phases. The main thread spins for completion: phases are short.
 
 #define MAX_WORKERS 63
-#define SPIN_BEFORE_SLEEP 4000
+#define SPIN_BEFORE_SLEEP 40000
 
 pool_workers: u32 = 0                  ; worker threads (the main thread is extra)
 pool_gen: u32 = 0                      ; incremented to start a job
