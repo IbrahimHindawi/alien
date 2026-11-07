@@ -25,6 +25,15 @@ SCENARIOS = [  # (entities, ticks, seed, spawn_half): sparse, dense, very dense 
     (4000, 700, 7, 150),        # every ability, twice: dash, pulse, beam, bomb strike
 ]
 QUICK = SCENARIOS[:2]
+# large scenarios the Python model is too slow for: hashes recorded from
+# engine runs that matched the model's scenarios at every thread count, and
+# matched independently by the C rival (C:\devellien-rival). They cover
+# what small runs miss: band boundaries, the windowed build, dense crowds.
+LARGE = [  # (entities, ticks, seed, spawn_half, hash)
+    (100000, 600, 1, 1000, 'ab8666237ff52a1c'),
+    (1000000, 300, 1, 1000, '7a1a32542db8e5ab'),
+    (1000000, 300, 1, 300, '9f1e580c29fd4f94'),
+]
 
 
 def run(args):
@@ -61,6 +70,14 @@ def main():
             got = next((l.split()[0].split('=', 1)[1] for l in out.splitlines() if l.startswith('hash=')), None)
             check(f'reference hash n={n} ticks={t} seed={seed} spawn_half={half} threads={threads}',
                   code == 0 and got == want, f'engine {got} reference {want}')
+    if not a.quick:
+        for n, t, seed, half, want in LARGE:
+            args = ['--entities', str(n), '--ticks', str(t), '--seed', str(seed), '--spawn-half', str(half)]
+            for threads in ('1', '16'):
+                code, out = run(['--bench-sim', '--threads', threads, *args])
+                got = next((l.split()[0].split('=', 1)[1] for l in out.splitlines() if l.startswith('hash=')), None)
+                check(f'recorded hash n={n} ticks={t} spawn_half={half} threads={threads}',
+                      code == 0 and got == want, f'engine {got} recorded {want}')
     print(f'{failures} failure(s)')
     sys.exit(1 if failures else 0)
 

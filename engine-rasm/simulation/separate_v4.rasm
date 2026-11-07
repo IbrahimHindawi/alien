@@ -134,26 +134,107 @@ fast_row:
     mov r10d, dword ptr [r15 + rdx*4]
     cmp r8d, r10d
     jae fast_next_row
-fast_candidate:
+    ; four per step when the overrun stays in this row: the slots past the
+    ; run are cells hi + 1 .. hi + 7 of the same row, >= 2 m from every lane, so they
+    ; never hit. w is masked once: a missed lane adds dx * 0 = +-0.0f, which
+    ; changes no sum (a sum is never -0.0f). Else one per step.
+    ; bound: the start of cell min(hi + 8, last) of this row, a counter this
+    ; band owns (the next row's start may belong to the next band, unbuilt)
+    lea eax, [rbp + 8]
+    mov edx, GRID_DIM - 1
+    cmp eax, edx
+    cmova eax, edx
+    mov edx, edi
+    shl edx, GRID_SHIFT
+    add eax, edx
+    mov eax, dword ptr [r15 + rax*4]
+    sub eax, 3
+    cmp r10d, eax
+    jg fast_one
+fast_four:
     vbroadcastss ymm6, dword ptr [r12 + r8*4]
     vbroadcastss ymm7, dword ptr [r13 + r8*4]
-    vsubps ymm8, ymm0, ymm6                        ; dx = px - x
-    vsubps ymm9, ymm1, ymm7                        ; dz
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
     vmulps ymm10, ymm8, ymm8
     vmulps ymm11, ymm9, ymm9
-    vaddps ymm10, ymm10, ymm11                     ; d2
-    vcmpps ymm11, ymm10, ymm14, 17                 ; d2 < 1
-    vsubps ymm10, ymm14, ymm10                     ; w = 1 - d2
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
     vmulps ymm8, ymm8, ymm10
     vmulps ymm9, ymm9, ymm10
-    vandps ymm8, ymm8, ymm11
-    vandps ymm9, ymm9, ymm11
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    vbroadcastss ymm6, dword ptr [r12 + r8*4 + 4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4 + 4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    vbroadcastss ymm6, dword ptr [r12 + r8*4 + 8]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4 + 8]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    vbroadcastss ymm6, dword ptr [r12 + r8*4 + 12]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4 + 12]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    add r8d, 4
+    cmp r8d, r10d
+    jb fast_four
+    jmp fast_next_row
+fast_one:
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
     vaddps ymm2, ymm2, ymm8
     vaddps ymm3, ymm3, ymm9
     vpsubd ymm4, ymm4, ymm11
     inc r8d
     cmp r8d, r10d
-    jb fast_candidate
+    jb fast_one
 fast_next_row:
     ; a lane past 16 hits in this row (itself included: a safe over-count)
     ; may have met the cap: redo this row, and the rest, exactly from the state
