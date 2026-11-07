@@ -254,3 +254,25 @@ moving six columns of every entity through memory, not placing them. What is
 left of the gap is the number of passes over memory per tick (bin, build,
 separate: about three), against the rival's one (build rows into cache-sized
 buffers, separate and integrate them while they are there).
+
+## 2026-11-07: separation and integration fused into the band jobs (kept, neutral)
+
+- **Change**: a band job that has just built its band separates and
+  integrates the band's interior rows (lo + 1 .. lo + 6) at once, while they
+  are in its cache; a second pass does each band's first and last rows once
+  every band is built; integrated positions go to a third position column.
+  Only when no band holds more than 1/32 of the population: a dense crowd
+  fills few bands, and per-band work then sits on few threads (dense 1M at
+  16 threads went 3974 -> 5004 us fused unconditionally), so such ticks
+  separate over chunks of slots as before.
+- **Correctness**: every reference hash, the contest's recorded hashes; the
+  self tests run the build unfused.
+- **Measured** (16 threads): 1M sparse 2390 -> 2318..2419, 100k 375 -> 353..365,
+  dense unchanged. Within noise. **Kept** for the structure, not the gain.
+
+What remains between this engine and the C rival is the shape of a tick, not
+any one kernel: here a tick is six pool phases with a barrier each (bin,
+bucket, band build, edges, deaths, area effects), each reading its inputs
+from L3/DRAM; the rival builds each band's rows from the previous tick's
+neighbouring rows inside one work-stealing pass and never has the global bin
+and bucket passes.

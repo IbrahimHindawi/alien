@@ -47,6 +47,10 @@ mov_off: [8192]u32[align(64)] = {}
 mov_band_off: [GRID_BANDS]u32 = {}
 mov_band_total: [GRID_BANDS]u32 = {}
 grid_old_count: u32 = 0                 ; storage at the start of the build
+grid_fuse: u32 = 0                      ; 1: also separate and integrate (sim_step)
+grid_fuse_now: u32 = 0                  ; this build fuses per band (the population is spread out)
+sim_pos3_x: *f32 = 0                    ; the integrated positions of a fused build
+sim_pos3_z: *f32 = 0
 sim_slot_cell2: *u32 = 0                ; the new cells of the slots, swapped in at the end
 
 ; ecx: begin, edx: end (entities; begin a multiple of 8), r8d: chunk
@@ -375,6 +379,17 @@ gather_b:
     inc ecx
     jmp gather_b
 gathered_b:
+    ; fused: the band's interior rows (lo + 1 .. lo + 6) need only the band's
+    ; own rows, which this thread has just written: separate and integrate
+    ; them now, while they are in its cache
+    cmp grid_fuse_now, 0
+    je not_fused
+    mov eax, dword ptr [rsp + 24]      ; lo cell
+    mov rsi, sim_cell_arr
+    mov ecx, dword ptr [rsi + rax*4 + 4 + GRID_DIM * 4]         ; start of row lo + 1
+    mov edx, dword ptr [rsi + rax*4 + 4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
+    call sim_separate_v4
+not_fused:
     add rsp, 40
     pop rbp
     pop r15
@@ -382,6 +397,26 @@ gathered_b:
     pop r13
     pop r12
     pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
+; r8d: band. The band's first and last rows, after every band is built.
+grid_edge_job: proc(begin: u32, end: u32, band: u32) = {
+    push rbx
+    push rsi
+    sub rsp, 40                        ; 8 + 16 + 40 = 64
+    mov ebx, r8d
+    shl ebx, BAND_SHIFT                ; lo cell
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + rbx*4]
+    mov edx, dword ptr [rsi + rbx*4 + GRID_DIM * 4]
+    call sim_separate_v4
+    mov ecx, dword ptr [rsi + rbx*4 + 7 * GRID_DIM * 4]
+    mov edx, dword ptr [rsi + rbx*4 + BAND_CELLS * 4]
+    call sim_separate_v4
+    add rsp, 40
     pop rsi
     pop rbx
     ret
@@ -407,6 +442,19 @@ sim_grid_mt: proc() = {
     mov qword ptr [rsp + 24], rax
     mov eax, sim_count
     mov grid_old_count, eax
+    ; a fused build works on the columns it is building
+    mov rax, sim_pos_x2
+    mov fz_src_x, rax
+    mov rax, sim_pos_z2
+    mov fz_src_z, rax
+    mov rax, sim_vel_x2
+    mov fz_vel_x, rax
+    mov rax, sim_vel_z2
+    mov fz_vel_z, rax
+    mov rax, sim_pos3_x
+    mov fz_out_x, rax
+    mov rax, sim_pos3_z
+    mov fz_out_z, rax
     mov rcx, grid_bin_job&
     mov edx, sim_count
     mov r8d, BIN_CHUNK
@@ -418,6 +466,7 @@ sim_grid_mt: proc() = {
     mov edi, eax
     xor edx, edx                       ; running
     xor ebx, ebx                       ; band
+    xor r10d, r10d                     ; the fullest band
     lea r8, bin_hist
     lea r9, bin_off
 bands:
@@ -439,10 +488,22 @@ chunks_done:
     sub eax, esi
     lea rcx, band_total
     mov dword ptr [rcx + rbx*4], eax
+    cmp eax, r10d
+    cmova r10d, eax
     inc ebx
     cmp ebx, GRID_BANDS
     jb bands
     mov grid_live, edx                 ; the survivors: the new population
+    ; fuse per band only when no band holds more than 1/32 of everyone: a dense
+    ; crowd fills a few bands, and per-band work would sit on a few threads
+    mov grid_fuse_now, 0
+    cmp grid_fuse, 0
+    je fuse_decided
+    shl r10d, 5
+    cmp r10d, edx
+    ja fuse_decided
+    mov grid_fuse_now, 1
+fuse_decided:
     ; the movers' lists, the same way
     xor edx, edx
     xor ebx, ebx
@@ -529,6 +590,33 @@ mchunks_done:
     mov rcx, sim_slot_cell2
     mov sim_slot_cell, rcx
     mov sim_slot_cell2, rax
+    cmp grid_fuse, 0
+    je unfused
+    cmp grid_fuse_now, 0
+    je by_slots
+    ; the boundary rows, now that every band is built
+    mov rcx, grid_edge_job&
+    mov edx, GRID_BANDS
+    mov r8d, 1
+    call pool_dispatch
+    jmp separated
+by_slots:
+    ; a dense crowd: separation over chunks of slots, on every thread
+    mov rcx, sim_separate_v4&
+    mov edx, sim_count
+    mov r8d, 2048
+    call pool_dispatch
+separated:
+    ; the integrated positions become the live ones
+    mov rax, sim_pos_x
+    mov rcx, sim_pos3_x
+    mov sim_pos_x, rcx
+    mov sim_pos3_x, rax
+    mov rax, sim_pos_z
+    mov rcx, sim_pos3_z
+    mov sim_pos_z, rcx
+    mov sim_pos3_z, rax
+unfused:
     mov rax, sim_pos_x
     mov sim_sorted_x, rax
     mov rax, sim_pos_z

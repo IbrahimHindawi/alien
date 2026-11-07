@@ -167,6 +167,14 @@ sim_alloc: proc() -> b32 = {
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
+    mov sim_pos3_x, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_pos3_z, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
     mov sim_slot_id, rax
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
@@ -781,7 +789,9 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_hero, rcx
     mov rbx, rax
-    call sim_grid_mt                   ; storage into grid order, binned by band
+    mov grid_fuse, 1
+    call sim_grid_mt                   ; grid order, separation and integration, fused per band
+    mov grid_fuse, 0
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -789,19 +799,7 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_grid, rcx
     mov rbx, rax
-    mov rcx, sim_separate_v4&          ; separation and integration, fused
-    mov edx, sim_count
-    mov r8d, 2048
-    call pool_dispatch
-    ; the integrated positions become the live ones
-    mov rax, sim_pos_x
-    mov rcx, sim_pos_x2
-    mov sim_pos_x, rcx
-    mov sim_pos_x2, rax
-    mov rax, sim_pos_z
-    mov rcx, sim_pos_z2
-    mov sim_pos_z, rcx
-    mov sim_pos_z2, rax
+    ; (separation and integration ran inside the grid build)
     rdtsc
     shl rdx, 32
     or rax, rdx

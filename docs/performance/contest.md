@@ -70,8 +70,20 @@ adds on top of the same design.
 | separation + integration fused | 1228 | 400 | 15907 | 2752 | 40569 | 3857 |
 | the dead left to the next build | 1282 | 357 | 15639 | 2481 | 41504 | 3928 |
 | incremental rebuild | 1391 | 375 | 14880 | 2390 | 42030 | 3974 |
+| fused band pass (adaptive) | 1492 | 365 | 15511 | 2419 | 41195 | 4074 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
 
-Left from the list: the incremental rebuild (idea 2) and the fused band pass
-(idea 3). The grid build is memory-bound now (log, 2026-11-07), and those two
-are what remove its traffic.
+All six ideas are now in the assembly engine, each exact (every hash
+passes). Round 2 closed the gap from 1.4-4.9x to 1.4-3.3x: one thread is
+within 1.5-1.9x everywhere, 16 threads 2.1-3.3x.
+
+**Can assembly beat clang here?** Not with this engine's tick structure. The
+C engine's remaining advantage is the shape of a tick: one work-stealing pass
+that builds each band from the previous tick's neighbouring rows and
+separates it in cache, with no global bin and bucket passes and no barrier
+between phases. Our tick is six pool phases, each reading its inputs from
+L3/DRAM, and at 16 threads it is memory-bound. Instruction-level work on top
+of that was worth single-digit percent per step today. Matching that shape is
+a rewrite of the simulation's scheduling, not a port of one more kernel; after
+it, the honest expectation for assembly is parity to a 10-30% edge on the
+compute-bound parts (dense separation), not a multiple.
