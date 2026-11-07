@@ -366,3 +366,29 @@ Four candidates per loop step, the ones past a run's end redirected (cmov) to
 a sentinel slot 1e9 m away in the columns' padding. Exact, but neutral in
 every cell (e.g. 1M 1T 12205 -> 12364 us, 16T 1345 -> 1339): the row-exit
 mispredictions it removes are not where the time is. **Discarded.**
+
+## 2026-11-07: from reading clang's code, and a profile (kept: three; discarded: three)
+
+Reading clang's assembly for the C rival's candidate loop and an AMD uProf
+time profile (one thread, 1M: separation 6.0 ms per tick, band build 4.4 ms,
+the rest negligible) led to:
+
+- **Kept** — the candidate loop as clang shapes it: `w` masked once (a missed
+  lane adds +-0.0f, exact) and four candidates per step reading past the run
+  inside the row, bounded by a counter the band owns. A first version bounded
+  by the row's end read the next band's unbuilt counter: the large hashes
+  failed, the small ones did not, so `tools/test.py` now checks the three
+  recorded large hashes at 1 and 16 threads.
+- **Kept** — a group's new cells stored with one vector store and counted with
+  two popcounts when all lanes share a band (was ~80 instructions per group).
+- **Kept** — windowed band counts from the last build's cell sizes minus the
+  leavers (vector compare), not an increment chain through memory per stayer.
+- **Kept** — pool workers spin 10x longer before sleeping (4-14% at 16 threads).
+- **Discarded** — AVX2 gathers for the band's columns (slower than scalar on
+  this CPU: 1M 1T 12.1 -> 13.6 ms); a register cursor for stayer placement
+  (cell-change branch mispredicts in sparse rows: 10.75 -> 12.46 ms).
+
+| us per tick | 100k 1T | 100k 16T | 1M 1T | 1M 16T | dense 1T | dense 16T |
+|---|---:|---:|---:|---:|---:|---:|
+| now | 1184 | 134 | 10753 | 1118 | 27989 | 2883 |
+| C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |

@@ -75,6 +75,7 @@ adds on top of the same design.
 | separation fast path (no self test, lazy cap) | 1366 | 286 | 13498 | 1768 | 33070 | 3024 |
 | AVX2 band prefix, chunk affinity in the pool | 1394 | 168 | 13444 | 1330 | 32204 | 3520 |
 | per-row cap fallback, all-capped exit | 1312 | 137 | 12184 | 1455 | 31142 | 2979 |
+| clang's loop shape, vector cell counts, longer spin, vector stayer counts | 1184 | 134 | 10753 | 1118 | 27989 | 2883 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
 
 All six ideas are now in the assembly engine, each exact (every hash
