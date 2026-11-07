@@ -1,0 +1,223 @@
+; renderer/post.rasm: the HDR scene target, bloom and the tone-mapped composite
+;
+; The scene is drawn into hdr_tex (RGBA16F, client size). post_finish then:
+;   bright pass   hdr -> bloom[0] (quarter size, soft threshold)
+;   blur x2       bloom[0] -> bloom[1] (horizontal) -> bloom[0] (vertical)
+;   composite     hdr + bloom, exposure, ACES, vignette -> the sRGB back buffer
+; and leaves the back buffer bound for the HUD.
+
+; D3D11_BIND_RENDER_TARGET (32) | D3D11_BIND_SHADER_RESOURCE (8)
+#define BIND_RT_SRV 40
+
+hdr_desc: D3D11_TEXTURE2D_DESC = {
+    .MipLevels = 1,
+    .ArraySize = 1,
+    .Format = DXGI_FORMAT.DXGI_FORMAT_R16G16B16A16_FLOAT,
+    .SampleDesc = { .Count = 1 },
+    .Usage = D3D11_USAGE.D3D11_USAGE_DEFAULT,
+    .BindFlags = BIND_RT_SRV,
+}
+bloom_desc: D3D11_TEXTURE2D_DESC = {
+    .MipLevels = 1,
+    .ArraySize = 1,
+    .Format = DXGI_FORMAT.DXGI_FORMAT_R11G11B10_FLOAT,
+    .SampleDesc = { .Count = 1 },
+    .Usage = D3D11_USAGE.D3D11_USAGE_DEFAULT,
+    .BindFlags = BIND_RT_SRV,
+}
+post_sampler_desc: D3D11_SAMPLER_DESC = {
+    .Filter = D3D11_FILTER.D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    .AddressU = D3D11_TEXTURE_ADDRESS_MODE.D3D11_TEXTURE_ADDRESS_CLAMP,
+    .AddressV = D3D11_TEXTURE_ADDRESS_MODE.D3D11_TEXTURE_ADDRESS_CLAMP,
+    .AddressW = D3D11_TEXTURE_ADDRESS_MODE.D3D11_TEXTURE_ADDRESS_CLAMP,
+    .ComparisonFunc = D3D11_COMPARISON_FUNC.D3D11_COMPARISON_NEVER,
+    .MaxLOD = 3.402823466e+38,
+}
+hdr_tex: *ID3D11Texture2D = {}
+hdr_rtv: *ID3D11RenderTargetView = {}
+hdr_srv: *ID3D11ShaderResourceView = {}
+bloom_tex: [2]*ID3D11Texture2D = {}
+bloom_rtv: [2]*ID3D11RenderTargetView = {}
+bloom_srv: [2]*ID3D11ShaderResourceView = {}
+post_sampler: *ID3D11SamplerState = {}
+vs_post: *ID3D11VertexShader = {}
+ps_bright: *ID3D11PixelShader = {}
+ps_blur_h: *ID3D11PixelShader = {}
+ps_blur_v: *ID3D11PixelShader = {}
+ps_composite: *ID3D11PixelShader = {}
+bloom_viewport: D3D11_VIEWPORT = { .MaxDepth = 1.0 }
+post_null: [2]*ID3D11ShaderResourceView = {}
+k_scene_clear: [4]const f32 = { 0.0, 0.0, 0.0, 1.0 }
+
+; Shaders and the sampler. -> eax 1 ok
+post_init: proc() -> b32 = {
+    sub rsp, 40
+    invoke(load_shader_bytes, "shaders\\post_vs.cso")
+    vcall(device, ID3D11DeviceVtbl.CreateVertexShader, rax, render_shader_size, 0, vs_post&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\bright_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_bright&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\blur_h_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_blur_h&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\blur_v_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_blur_v&)
+    test eax, eax
+    js failed
+    invoke(load_shader_bytes, "shaders\\composite_ps.cso")
+    vcall(device, ID3D11DeviceVtbl.CreatePixelShader, rax, render_shader_size, 0, ps_composite&)
+    test eax, eax
+    js failed
+    vcall(device, ID3D11DeviceVtbl.CreateSamplerState, post_sampler_desc&, post_sampler&)
+    test eax, eax
+    js failed
+    mov eax, 1
+    jmp done
+failed:
+    xor eax, eax
+done:
+    add rsp, 40
+    ret
+}
+
+; The size-dependent targets, for the current client size.
+post_create_targets: proc() = {
+    push rbx
+    sub rsp, 48                        ; 8 + 8 + 48 = 64
+    mov eax, client_width
+    mov hdr_desc.Width, eax
+    mov eax, client_height
+    mov hdr_desc.Height, eax
+    vcall(device, ID3D11DeviceVtbl.CreateTexture2D, hdr_desc&, 0, hdr_tex&)
+    vcall(device, ID3D11DeviceVtbl.CreateRenderTargetView, hdr_tex, 0, hdr_rtv&)
+    vcall(device, ID3D11DeviceVtbl.CreateShaderResourceView, hdr_tex, 0, hdr_srv&)
+    ; bloom: a quarter of each side, at least 1
+    mov eax, client_width
+    shr eax, 2
+    mov ecx, 1
+    cmp eax, ecx
+    cmovb eax, ecx
+    mov bloom_desc.Width, eax
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss bloom_viewport.Width, xmm0
+    mov eax, client_height
+    shr eax, 2
+    cmp eax, ecx
+    cmovb eax, ecx
+    mov bloom_desc.Height, eax
+    vcvtsi2ss xmm0, xmm0, eax
+    vmovss bloom_viewport.Height, xmm0
+    xor ebx, ebx
+one:
+    lea rax, bloom_tex
+    lea rax, [rax + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateTexture2D, bloom_desc&, 0, rax)
+    lea rax, bloom_tex
+    mov rdx, [rax + rbx*8]
+    lea r8, bloom_rtv
+    lea r8, [r8 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateRenderTargetView, rdx, 0, r8)
+    lea rax, bloom_tex
+    mov rdx, [rax + rbx*8]
+    lea r8, bloom_srv
+    lea r8, [r8 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateShaderResourceView, rdx, 0, r8)
+    inc ebx
+    cmp ebx, 2
+    jb one
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+post_release_targets: proc() = {
+    push rbx
+    sub rsp, 48
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 0, 2, post_null&)
+    vcall(hdr_srv, ID3D11ShaderResourceViewVtbl.Release)
+    vcall(hdr_rtv, ID3D11RenderTargetViewVtbl.Release)
+    vcall(hdr_tex, ID3D11Texture2DVtbl.Release)
+    xor ebx, ebx
+one:
+    lea rax, bloom_srv
+    mov rax, [rax + rbx*8]
+    vcall(rax, ID3D11ShaderResourceViewVtbl.Release)
+    lea rax, bloom_rtv
+    mov rax, [rax + rbx*8]
+    vcall(rax, ID3D11RenderTargetViewVtbl.Release)
+    lea rax, bloom_tex
+    mov rax, [rax + rbx*8]
+    vcall(rax, ID3D11Texture2DVtbl.Release)
+    inc ebx
+    cmp ebx, 2
+    jb one
+    add rsp, 48
+    pop rbx
+    ret
+}
+
+; One full-screen pass: rdx render target view (address of the pointer), r8 source view (address).
+post_pass: proc() = {
+    push rbx
+    push rsi
+    sub rsp, 40                        ; 8 + 16 + 40 = 64
+    mov rbx, rdx
+    mov rsi, r8
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 0, 2, post_null&)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetRenderTargets, 1, rbx, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 0, 1, rsi)
+    vcall(context, ID3D11DeviceContextVtbl.Draw, 3, 0)
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
+}
+
+; Bloom and composite into the back buffer, which stays bound for the HUD.
+post_finish: proc() = {
+    push rbx
+    sub rsp, 48
+    vcall(context, ID3D11DeviceContextVtbl.OMSetBlendState, 0, 0, 0xFFFFFFFF)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, ui_depth, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetInputLayout, 0)
+    vcall(context, ID3D11DeviceContextVtbl.IASetPrimitiveTopology, D3D11_PRIMITIVE_TOPOLOGY.D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+    vcall(context, ID3D11DeviceContextVtbl.VSSetShader, vs_post, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetSamplers, 0, 1, post_sampler&)
+    vcall(context, ID3D11DeviceContextVtbl.RSSetViewports, 1, bloom_viewport&)
+    ; bright pass
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_bright, 0, 0)
+    lea rdx, bloom_rtv
+    lea r8, hdr_srv
+    call post_pass
+    ; two blur rounds
+    mov ebx, 2
+blur:
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_blur_h, 0, 0)
+    lea rdx, bloom_rtv
+    add rdx, 8
+    lea r8, bloom_srv
+    call post_pass
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_blur_v, 0, 0)
+    lea rdx, bloom_rtv
+    lea r8, bloom_srv
+    add r8, 8
+    call post_pass
+    dec ebx
+    jnz blur
+    ; composite: t0 scene, t1 bloom
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 0, 2, post_null&)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetRenderTargets, 1, backbuffer_rtv&, 0)
+    vcall(context, ID3D11DeviceContextVtbl.RSSetViewports, 1, viewport&)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShader, ps_composite, 0, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 0, 1, hdr_srv&)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 1, 1, bloom_srv&)
+    vcall(context, ID3D11DeviceContextVtbl.Draw, 3, 0)
+    vcall(context, ID3D11DeviceContextVtbl.PSSetShaderResources, 0, 2, post_null&)
+    add rsp, 48
+    pop rbx
+    ret
+}

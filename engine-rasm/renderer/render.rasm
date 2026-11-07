@@ -42,7 +42,7 @@ FrameConstants: struct = {
 
 frame_cb: FrameConstants = {
     .light_dir = { -0.4777, 0.7961, -0.3715, 1.0 },
-    .fog_color = { 0.060, 0.050, 0.120, 0.0032 },
+    .fog_color = { 0.045, 0.040, 0.085, 0.0032 },
     .params = { 1.5, 0.0, 1.0, 0.0 },
 }
 
@@ -321,6 +321,7 @@ render_create_targets: proc() = {
     vcall(device, ID3D11DeviceVtbl.CreateTexture2D, depth_desc&, 0, depth_tex&)
     vcall(device, ID3D11DeviceVtbl.CreateDepthStencilView, depth_tex, 0, depth_dsv&)
     vcall(device, ID3D11DeviceVtbl.CreateTexture2D, staging_desc&, 0, staging_tex&)
+    call post_create_targets
     mov eax, client_width
     vcvtsi2ss xmm0, xmm0, eax
     vmovss viewport.Width, xmm0
@@ -339,6 +340,7 @@ render_release_targets: proc() = {
     vcall(depth_dsv, ID3D11DepthStencilViewVtbl.Release)
     vcall(depth_tex, ID3D11Texture2DVtbl.Release)
     vcall(staging_tex, ID3D11Texture2DVtbl.Release)
+    call post_release_targets
     add rsp, 40
     ret
 }
@@ -485,6 +487,9 @@ instance:
     test eax, eax
     js failed
     call ui_init
+    test eax, eax
+    jz failed
+    call post_init
     test eax, eax
     jz failed
     invoke(arena_reset, arena_frame&)
@@ -782,10 +787,10 @@ render_frame: proc() = {
     call render_fill_effects
     call render_upload_frame
 
-    vcall(context, ID3D11DeviceContextVtbl.ClearRenderTargetView, backbuffer_rtv, clear_color&)
+    vcall(context, ID3D11DeviceContextVtbl.ClearRenderTargetView, hdr_rtv, clear_color&)
     vmovss xmm3, k_depth_one           ; Depth is a float: the fourth argument goes in xmm3
     vcall(context, ID3D11DeviceContextVtbl.ClearDepthStencilView, depth_dsv, D3D11_CLEAR_FLAG.D3D11_CLEAR_DEPTH, 0, 0)
-    vcall(context, ID3D11DeviceContextVtbl.OMSetRenderTargets, 1, backbuffer_rtv&, depth_dsv)
+    vcall(context, ID3D11DeviceContextVtbl.OMSetRenderTargets, 1, hdr_rtv&, depth_dsv)
     vcall(context, ID3D11DeviceContextVtbl.OMSetDepthStencilState, depth_state, 0)
     vcall(context, ID3D11DeviceContextVtbl.RSSetViewports, 1, viewport&)
     vcall(context, ID3D11DeviceContextVtbl.RSSetState, raster_state)
@@ -875,6 +880,7 @@ next_lod:
     mov eax, hero_mesh.index_count
     vcall(context, ID3D11DeviceContextVtbl.DrawIndexed, rax, 0, 0)
     no_hero:
+    call post_finish
     call hud_draw
 
     ; --record dir: every second frame as dir/fNNNNN.bmp (30 fps of 60 Hz ticks)

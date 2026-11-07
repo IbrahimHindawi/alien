@@ -33,7 +33,7 @@ cbuffer Frame : register(b0)
     float4 game;
 };
 
-static const float3 HORIZON = float3(0.060, 0.050, 0.120);
+static const float3 HORIZON = float3(0.045, 0.040, 0.085);
 static const float3 ZENITH  = float3(0.006, 0.008, 0.022);
 static const float3 KEY     = float3(1.00, 0.84, 0.66);
 static const float3 CYAN    = float3(0.05, 0.80, 1.00);
@@ -187,7 +187,9 @@ float4 ps_unit(VsOut i) : SV_Target
     float rim = pow(1.0 - saturate(dot(n, v)), 3.0);
     c += rim * float3(0.10, 0.12, 0.20) * occl;
     // emissive accent; bolts and shards burn hotter
-    c += albedo * lerp(2.4, 4.0, i.extra.z) * i.color.a;
+    // orange with little green: ACES compresses ratios, a hot orange would come out yellow
+    float3 glow = lerp(float3(1.0, 0.13, 0.008) * 1.2, albedo * 6.0, i.extra.z);
+    c += glow * i.color.a;
     c = apply_fog(c, i.world);
     c = lerp(c, float3(1.0, 1.0, 1.0), params.y * i.extra.w * (1.0 - i.color.a)); // hero damage flash
     return float4(c, 1.0);
@@ -219,9 +221,9 @@ float4 ps_sky(SkyOut i) : SV_Target
     float s = saturate(dot(d, light_dir.xyz));
     c += float3(0.30, 0.20, 0.14) * pow(s, 64.0) + float3(0.05, 0.035, 0.03) * pow(s, 6.0);
     // stars above the haze
-    float2 sp = float2(atan2(d.z, d.x) * 180.0, h * 300.0);
-    float star = step(0.996, hash21(floor(sp))) * saturate(h * 4.0 - 0.2);
-    c += star * 0.25;
+    float2 sp = float2(atan2(d.z, d.x) * 700.0, h * 1100.0);
+    float star = step(0.9985, hash21(floor(sp))) * saturate(h * 4.0 - 0.2);
+    c += star * hash21(floor(sp) + 7.0) * 0.6;
     return float4(c, 1.0);
 }
 
@@ -276,7 +278,7 @@ float4 ps_ground(VsOut i) : SV_Target
     float edge = vo.y - vo.x;
     float crack = 1.0 - smoothstep(0.02, 0.09, edge);
     float big = vnoise(p / 90.0);
-    float3 base = lerp(float3(0.028, 0.030, 0.040), float3(0.050, 0.046, 0.058), vo.z);
+    float3 base = lerp(float3(0.020, 0.021, 0.026), float3(0.036, 0.034, 0.040), vo.z);
     base *= 0.75 + 0.5 * big;
     base *= 1.0 - 0.10 * vnoise(p * 1.7) * fade;
     float3 c = base * (1.0 - 0.75 * crack * fade);
@@ -285,12 +287,13 @@ float4 ps_ground(VsOut i) : SV_Target
     float vein_cells = step(0.62, hash21(floor(p / 7.0 + vo.z * 7.0)));
     float pulse = 0.55 + 0.45 * sin(time * 1.3 + vnoise(p / 30.0) * 12.0);
     float veins = crack * saturate(big * 1.6 - 0.35) * (0.4 + 0.6 * vein_cells);
-    c += ORANGE * veins * pulse * 0.10 * (0.4 + 0.6 * fade);
+    float3 vein_glow = ORANGE * veins * pulse * 0.9 * (0.4 + 0.6 * fade);
 
     // lighting: key, sky and the hero's lamp
     float ndl = saturate(light_dir.y);
     float3 lit = c * (KEY * ndl * 1.1 + float3(0.30, 0.32, 0.45) * light_dir.w);
     lit += c * hero_lamp(i.world, float3(0, 1, 0)) * 2.0;
+    lit += vein_glow;
 
     float3 h = hero_pos();
     float dh = distance(p, h.xz);
@@ -336,14 +339,14 @@ ShadowOut vs_shadow(uint vid : SV_VertexID, float4 inst : INSTANCE0)
 {
     float2 corners[6] = { float2(-1, -1), float2(1, 1), float2(-1, 1), float2(-1, -1), float2(1, -1), float2(1, 1) };  // front facing seen from above
     float2 c = corners[vid];
-    float r = 0.75;
+    float r = 1.25;
     // the key light is low: the shadow falls away from it
     float2 off = -light_dir.xz * 0.35;
     float3 wp = float3(inst.x + off.x + c.x * r, 0.02, inst.y + off.y + c.y * r);
     ShadowOut o;
     o.clip = mul(float4(wp, 1.0), view_proj);
     o.uv = c;
-    o.a = 0.55;
+    o.a = 0.8;
     return o;
 }
 
@@ -375,4 +378,79 @@ UiOut vs_ui(uint vid : SV_VertexID, float4 rect : RECT, float4 color : COLOR)
 float4 ps_ui(UiOut i) : SV_Target
 {
     return i.color;
+}
+
+// Post: the scene is drawn into an HDR target; a quarter-size bright pass is
+// blurred twice (separable Gaussian) and added back, then tone-mapped into
+// the sRGB back buffer. t0 = source, t1 = bloom, s0 = linear clamp.
+Texture2D tex0 : register(t0);
+Texture2D tex1 : register(t1);
+SamplerState lin : register(s0);
+
+struct PostOut
+{
+    float4 clip : SV_Position;
+    float2 uv   : UV;
+};
+
+PostOut vs_post(uint id : SV_VertexID)
+{
+    float2 p = float2((id << 1) & 2, id & 2);
+    PostOut o;
+    o.clip = float4(p * 2.0 - 1.0, 0.0, 1.0);
+    o.uv = float2(p.x, 1.0 - p.y);
+    return o;
+}
+
+float4 ps_bright(PostOut i) : SV_Target
+{
+    float w, h;
+    tex0.GetDimensions(w, h);
+    float2 t = 1.0 / float2(w, h);
+    // 4 bilinear taps cover the 4x4 source texels under this quarter-size texel
+    float3 c = tex0.Sample(lin, i.uv + t * float2(-1, -1)).rgb
+             + tex0.Sample(lin, i.uv + t * float2(1, -1)).rgb
+             + tex0.Sample(lin, i.uv + t * float2(-1, 1)).rgb
+             + tex0.Sample(lin, i.uv + t * float2(1, 1)).rgb;
+    c *= 0.25;
+    float b = max(c.r, max(c.g, c.b));
+    float soft = saturate((b - 0.35) / 0.5);
+    return float4(c * soft * soft, 1.0);
+}
+
+float3 blur(float2 uv, float2 dir)
+{
+    float w, h;
+    tex0.GetDimensions(w, h);
+    float2 t = dir / float2(w, h);
+    // 9-tap Gaussian in 5 bilinear samples
+    float3 c = tex0.Sample(lin, uv).rgb * 0.2270270;
+    c += tex0.Sample(lin, uv + t * 1.3846154).rgb * 0.3162162;
+    c += tex0.Sample(lin, uv - t * 1.3846154).rgb * 0.3162162;
+    c += tex0.Sample(lin, uv + t * 3.2307692).rgb * 0.0702703;
+    c += tex0.Sample(lin, uv - t * 3.2307692).rgb * 0.0702703;
+    return c;
+}
+
+float4 ps_blur_h(PostOut i) : SV_Target { return float4(blur(i.uv, float2(1.6, 0.0)), 1.0); }
+float4 ps_blur_v(PostOut i) : SV_Target { return float4(blur(i.uv, float2(0.0, 1.6)), 1.0); }
+
+float3 aces(float3 x)
+{
+    return saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
+}
+
+float4 ps_composite(PostOut i) : SV_Target
+{
+    float3 c = tex0.Sample(lin, i.uv).rgb;
+    float3 b = tex1.Sample(lin, i.uv).rgb;
+    c += b * 0.9;
+    c *= 1.0;                                    // exposure
+    c = aces(c);
+    float2 d = i.uv - 0.5;
+    c *= 1.0 - dot(d, d) * 0.75;                 // vignette
+    // damage: the edges bleed red as health runs out
+    float hurt = (1.0 - game.y) * game.x;
+    c = lerp(c, float3(0.5, 0.0, 0.02), saturate(dot(d, d) * 3.0) * hurt * hurt * 0.8);
+    return float4(c, 1.0);
 }
