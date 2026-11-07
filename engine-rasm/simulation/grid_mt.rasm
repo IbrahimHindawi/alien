@@ -216,7 +216,10 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     shl r9d, BAND_SHIFT                ; lo cell
     mov dword ptr [rsp + 24], r9d
     mov rsi, sim_cell_arr
-    ; zero arr[lo + 1 .. lo + BAND_CELLS] (and arr[0] for band 0)
+    ; zero arr[lo + 1 .. lo + BAND_CELLS] (and arr[0] for band 0); a windowed
+    ; build keeps them: they are the last build's cell starts, its counts' source
+    cmp grid_windowed, 0
+    jne zeroed
     lea rdi, [rsi + r9*4 + 4]
     xor eax, eax
     mov ecx, BAND_CELLS
@@ -316,6 +319,8 @@ collected_tail:
     mov grid_count_error, 1            ; the integration's counts disagree: a bug
     mov r15d, edi
 full_counts:
+    cmp grid_windowed, 0
+    jne window_counts
     ; count stayers (new cell = old cell) and movers
     mov ecx, dword ptr [rsp + 12]
 count_stay:
@@ -328,7 +333,61 @@ count_stay:
 next_stay:
     inc ecx
     jmp count_stay
+    jmp counted_stay
+window_counts:
+    ; stayers per cell = the cell's old size (from the last build's starts,
+    ; still in the counters) minus the old slots that left it (movers, dead)
+    lea rdi, [rsi + r9*4 + 4]          ; arr[lo + 1]: start of cell lo
+    mov ecx, BAND_CELLS / 8 - 1
+old_sizes:
+    vmovdqu ymm0, ymmword ptr [rdi]
+    vmovdqu ymm1, ymmword ptr [rdi + 4]
+    vpsubd ymm1, ymm1, ymm0
+    vmovdqu ymmword ptr [rdi], ymm1
+    add rdi, 32
+    dec ecx
+    jnz old_sizes
+    ; the band's last block: the last cell ends at the old range's end (the next
+    ; counter belongs to the next band)
+    vmovdqu ymm0, ymmword ptr [rdi]
+    vmovdqu ymm1, ymmword ptr [rdi + 4]
+    vmovd xmm2, dword ptr [rsp + 16]
+    vpbroadcastd ymm2, xmm2
+    vpblendd ymm1, ymm1, ymm2, 0x80
+    vpsubd ymm1, ymm1, ymm0
+    vmovdqu ymmword ptr [rdi], ymm1
+    mov ecx, dword ptr [rsp + 12]
+leavers:
+    mov edx, dword ptr [rsp + 16]
+    sub edx, ecx
+    jbe counted_stay
+    vmovdqu ymm0, ymmword ptr [r8 + rcx*4]
+    vpcmpeqd ymm0, ymm0, ymmword ptr [r10 + rcx*4]
+    vmovmskps eax, ymm0
+    not eax
+    mov r11d, 255
+    cmp edx, 8
+    jae leavers_full
+        mov r11d, edx
+        bzhi r11d, eax, r11d           ; only the lanes before the range's end
+        mov eax, r11d
+        jmp leaving
+    leavers_full:
+    and eax, r11d
+leaving:
+    test eax, eax
+    jz leavers_next
+    tzcnt edx, eax
+    blsr eax, eax
+    lea r11d, [rcx + rdx]
+    mov r11d, dword ptr [r10 + r11*4]  ; its old cell
+    dec dword ptr [rsi + r11*4 + 4]
+    jmp leaving
+leavers_next:
+    add ecx, 8
+    jmp leavers
 counted_stay:
+    vzeroupper
     xor ecx, ecx
 count_move:
     cmp ecx, r15d
