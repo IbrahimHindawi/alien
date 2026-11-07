@@ -36,7 +36,7 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     push r13
     push r14
     push r15
-    sub rsp, 1336                      ; 8 + 64 + 1336 = 1408; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes, [rsp + 240] largest move, [rsp + 288] band counts, [rsp + 800] mover counts
+    sub rsp, 1400                      ; 8 + 64 + 1336 = 1408; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes, [rsp + 240] largest move, [rsp + 288] band counts, [rsp + 800] mover counts
     movaps xmmword ptr [rsp + 64], xmm6
     movaps xmmword ptr [rsp + 80], xmm7
     movaps xmmword ptr [rsp + 96], xmm8
@@ -114,6 +114,27 @@ group:
     vxorps ymm2, ymm2, ymm2            ; sx
     vxorps ymm3, ymm3, ymm3            ; sz
     vpxor ymm4, ymm4, ymm4             ; hits per lane
+    ; the integration's steering needs only the lanes' positions: start its
+    ; sqrt/div chain now, so it runs alongside the candidate loop
+    vbroadcastss ymm6, hero_x
+    vsubps ymm6, ymm6, ymm0                        ; dx = hero - px
+    vbroadcastss ymm7, hero_z
+    vsubps ymm7, ymm7, ymm1                        ; dz
+    vmulps ymm8, ymm6, ymm6
+    vmulps ymm9, ymm7, ymm7
+    vaddps ymm8, ymm8, ymm9                        ; d2
+    vcmpps ymm9, ymm8, ymmword ptr k_stop, 30      ; d2 > STOP_R2
+    vblendvps ymm8, ymm14, ymm8, ymm9              ; 1.0 where masked out
+    vsqrtps ymm8, ymm8
+    vdivps ymm8, ymm14, ymm8                       ; inv
+    vmulps ymm6, ymm6, ymm8
+    vmulps ymm6, ymm6, ymmword ptr k_speed         ; tx = (dx * inv) * speed
+    vmulps ymm7, ymm7, ymm8
+    vmulps ymm7, ymm7, ymmword ptr k_speed
+    vandps ymm6, ymm6, ymm9
+    vandps ymm7, ymm7, ymm9
+    vmovups ymmword ptr [rsp + 1336], ymm6
+    vmovups ymmword ptr [rsp + 1368], ymm7
     cmp dword ptr [rsp + 232], 0
     jne exact                          ; the last group reached the cap: go exact
     ; fast: no self test, no cap, no lane mask. A lane meets itself once, adding
@@ -311,23 +332,8 @@ separated:
     ; integrate the group's own entities now (spec 4.4, the operations of
     ; sim_integrate in the same order): positions to the spare columns, as
     ; other groups still read this tick's start positions; velocities in place
-    vbroadcastss ymm6, hero_x
-    vsubps ymm6, ymm6, ymm0                        ; dx = hero - px
-    vbroadcastss ymm7, hero_z
-    vsubps ymm7, ymm7, ymm1                        ; dz
-    vmulps ymm8, ymm6, ymm6
-    vmulps ymm9, ymm7, ymm7
-    vaddps ymm8, ymm8, ymm9                        ; d2
-    vcmpps ymm9, ymm8, ymmword ptr k_stop, 30      ; d2 > STOP_R2
-    vblendvps ymm8, ymm14, ymm8, ymm9              ; 1.0 where masked out
-    vsqrtps ymm8, ymm8
-    vdivps ymm8, ymm14, ymm8                       ; inv
-    vmulps ymm6, ymm6, ymm8
-    vmulps ymm6, ymm6, ymmword ptr k_speed         ; tx = (dx * inv) * speed
-    vmulps ymm7, ymm7, ymm8
-    vmulps ymm7, ymm7, ymmword ptr k_speed
-    vandps ymm6, ymm6, ymm9
-    vandps ymm7, ymm7, ymm9
+    vmovups ymm6, ymmword ptr [rsp + 1336]         ; tx (computed at the group's start)
+    vmovups ymm7, ymmword ptr [rsp + 1368]         ; tz
     vmulps ymm10, ymm2, ymmword ptr k_sep
     vaddps ymm6, ymm6, ymm10                       ; tx + sep_x * 6
     vmulps ymm10, ymm3, ymmword ptr k_sep
@@ -481,7 +487,7 @@ merged_mover:
     movaps xmm13, xmmword ptr [rsp + 176]
     movaps xmm14, xmmword ptr [rsp + 192]
     movaps xmm15, xmmword ptr [rsp + 208]
-    add rsp, 1336
+    add rsp, 1400
     pop r15
     pop r14
     pop r13
