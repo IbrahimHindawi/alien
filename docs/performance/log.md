@@ -419,3 +419,20 @@ is the smallest signed key, and hung), then emits the movers before the next
 stayer. One thread, 1M: 10.66 -> 10.31 ms. At 16 threads the machine was
 loaded during the measurement (the C rival itself measured 916-997 us instead
 of 733); under that load the new and previous builds were within noise.
+
+## 2026-11-07: steering started early; boundary rows separated in the band job (kept)
+
+- The integration's steering (its sqrt/div chain) is computed at the group's
+  start and parked in two stack slots, so it runs alongside the candidate
+  loop: one thread 1M 10.31 -> 9.69 ms, 100k 1191 -> 1120 us.
+- A band whose lower neighbour is already finished (usually the same
+  thread's previous band, with the pool's affinity) separates the two rows
+  at their boundary at once and claims it; the edge pass does only unclaimed
+  boundaries. Bands publish a per-build stamp after their writes, so a band
+  reads only finished neighbours. One thread 100k 1111 -> 1037 us, 1M 9.66 ->
+  9.49 ms; 16 threads 1044 -> 1006 us.
+
+| us per tick | 100k 1T | 100k 16T | 1M 1T | 1M 16T | dense 1T | dense 16T |
+|---|---:|---:|---:|---:|---:|---:|
+| now | 1037 | 123 | 9493 | 1006 | 26433 | 2671 |
+| C rival (same session) | 1016 | 110 | 9256 | 741 | 22830 | 1919 |

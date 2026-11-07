@@ -52,6 +52,9 @@ grid_fuse_now: u32 = 0                  ; this build fuses per band (the populat
 grid_windowed_ticks: u32 = 0
 grid_windowed: u32 = 0                  ; this build counts from row windows (no bin, no bucket)
 grid_count_error: u32 = 0
+grid_build_id: u32 = 0                  ; this build's stamp
+band_done: [GRID_BANDS]u32 = {}         ; the stamp of the build that last finished each band
+edge_claim: [129]u32 = {}               ; [b]: the rows at the boundary below band b are done
 #define MERGE_FEW 256
 #define MERGE_NONE 0x7FFFFFFFFFFFFFFF
 k_shift1: [8]const u32[align(32)] = { 0, 0, 1, 2, 3, 4, 5, 6 }
@@ -846,6 +849,47 @@ gathered_b:
     mov ecx, dword ptr [rsi + rax*4 + 4 + GRID_DIM * 4]         ; start of row lo + 1
     mov edx, dword ptr [rsi + rax*4 + 4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
     call sim_separate_v4
+    ; the rows either side of the boundary with the band below (lo - 1, lo)
+    ; need only the two bands: when the band below is finished (usually this
+    ; thread's previous band), separate them now and claim the boundary
+    mov eax, dword ptr [rsp + 24]
+    shr eax, BAND_SHIFT
+    mov dword ptr [rsp + 32], eax      ; band
+    mov rsi, sim_cell_start
+    test eax, eax
+    jnz has_below
+        mov ecx, dword ptr [rsi]                       ; band 0: row 0 has no row below
+        mov edx, dword ptr [rsi + GRID_DIM * 4]
+        call sim_separate_v4
+        mov dword ptr edge_claim[0], 1
+        jmp below_done
+    has_below:
+    lea rdx, band_done
+    mov ecx, dword ptr [rdx + rax*4 - 4]
+    cmp ecx, grid_build_id
+    jne below_done
+    mov eax, dword ptr [rsp + 24]
+    mov ecx, dword ptr [rsi + rax*4 - GRID_DIM * 4]  ; start of row lo - 1
+    mov edx, dword ptr [rsi + rax*4 + GRID_DIM * 4]  ; start of row lo + 1
+    call sim_separate_v4
+    mov eax, dword ptr [rsp + 32]
+    lea rdx, edge_claim
+    mov dword ptr [rdx + rax*4], 1
+below_done:
+    ; the last band's top row has no row above
+    cmp dword ptr [rsp + 32], GRID_BANDS - 1
+    jne top_done
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + (GRID_CELLS - GRID_DIM) * 4]
+    mov edx, dword ptr [rsp + 8]
+    call sim_separate_v4
+    mov dword ptr edge_claim[GRID_BANDS * 4], 1
+top_done:
+    ; finished: the next band may now read this one
+    mov eax, grid_build_id
+    mov ecx, dword ptr [rsp + 32]
+    lea rdx, band_done
+    mov dword ptr [rdx + rcx*4], eax
 not_fused:
     add rsp, 72
     pop rbp
@@ -908,17 +952,28 @@ done:
 grid_edge_job: proc(begin: u32, end: u32, band: u32) = {
     push rbx
     push rsi
-    sub rsp, 40                        ; 8 + 16 + 40 = 64
+    push rdi
+    sub rsp, 32                        ; 8 + 24 + 32 = 64
+    mov edi, r8d                       ; band
     mov ebx, r8d
     shl ebx, BAND_SHIFT                ; lo cell
     mov rsi, sim_cell_start
+    lea rax, edge_claim
+    cmp dword ptr [rax + rdi*4], 0
+    jne bottom_done                    ; done by this band's job
     mov ecx, dword ptr [rsi + rbx*4]
     mov edx, dword ptr [rsi + rbx*4 + GRID_DIM * 4]
     call sim_separate_v4
+bottom_done:
+    lea rax, edge_claim
+    cmp dword ptr [rax + rdi*4 + 4], 0
+    jne top_done                       ; done by the next band's job
     mov ecx, dword ptr [rsi + rbx*4 + 7 * GRID_DIM * 4]
     mov edx, dword ptr [rsi + rbx*4 + BAND_CELLS * 4]
     call sim_separate_v4
-    add rsp, 40
+top_done:
+    add rsp, 32
+    pop rdi
     pop rsi
     pop rbx
     ret
@@ -1119,6 +1174,11 @@ mchunks_done:
     add grid_stage_cyc[8], rcx
     mov qword ptr [rsp + 24], rax
 bands_ready:
+    inc grid_build_id
+    xor eax, eax
+    lea rdi, edge_claim
+    mov ecx, GRID_BANDS + 1
+    rep stosd
     ; this build's integration counts for the next one
     xor eax, eax
     lea rdi, next_band_total
