@@ -476,3 +476,16 @@ flag (a group after a capped one starts exact) made dense worse (25.0 ->
 
 Duel, interleaved, loaded machine: 100k 1T 1.03, 100k 16T 1.35 (asm ahead);
 1M 1T 0.97, 1M 16T 0.82, dense 1T 0.91, dense 16T 0.79 (C ahead).
+
+## 2026-11-07: cap checkpoints per step (kept); checkpoint-free rows (discarded)
+
+- Checkpoints per 4-candidate step instead of per row (an overflow redoes at
+  most one step exactly; the restored counts drop each lane's own hit where it
+  was already met): dense 1M one thread 25.5 -> 23.4 ms, 16 threads 3.01 ->
+  2.78 ms; sparse pays 1-2%.
+- Skipping the checkpoints in rows where no lane can reach 16 (a horizontal
+  max per row): slower in sparse (10.05 -> 10.63 ms) and wrong as written
+  (padding lanes' counts); discarded.
+
+Duel, interleaved: 100k 1T 0.97, 100k 16T **1.19**, 1M 1T 0.96, 1M 16T 0.76,
+dense 1T **1.00**, dense 16T 0.84.
