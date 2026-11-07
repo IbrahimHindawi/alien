@@ -372,12 +372,14 @@ fold:
     mov ecx, 50000
     rep movsd
     call sim_grid_mt
-    mov rsi, sim_sorted_id
+    ; storage is now in grid order: its sequence numbers are sim_grid's ids
+    ; (sim_init numbered them by index) and its positions sim_grid's sorted x
+    mov rsi, sim_seq
     mov rdi, sim_sep_x
     mov ecx, 50000
     repe cmpsd
     jne bad
-    mov rsi, sim_sorted_x
+    mov rsi, sim_pos_x
     mov rdi, sim_sep_z
     mov ecx, 50000
     repe cmpsd
@@ -392,7 +394,7 @@ fold:
 bad:
     xor edx, edx
 report:
-    invoke(test_report, "grid on the pool equals sim_grid, crowded", rdx)
+    invoke(test_report, "grid-ordered storage equals sim_grid, crowded", rdx)
     add rsp, 32
     pop rdi
     pop rsi

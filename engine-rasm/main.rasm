@@ -148,6 +148,13 @@ finished:
     mov eax, sim_count
     mov ebx, hero_alive
     invoke(print, "count=%u hero_alive=%u\n", rax, rbx)
+    mov rbx, grid_stage_cyc[0]
+    shr rbx, 10
+    mov rsi, grid_stage_cyc[8]
+    shr rsi, 10
+    mov rax, grid_stage_cyc[16]
+    shr rax, 10
+    invoke(print, "grid stages (kcycles, all ticks): bin=%u bucket=%u bands=%u\n", rbx, rsi, rax)
     no_entities:
     mov rcx, opt_dump
     test rcx, rcx

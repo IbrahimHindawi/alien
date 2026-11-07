@@ -1,4 +1,10 @@
-; simulation/grid_mt.rasm: the grid's counting sort for threads, binned by band
+; simulation/grid_mt.rasm: storage into grid order, binned by band, for threads
+;
+; The live columns (pos, vel, hp, seq) are kept in grid order: sorted by cell,
+; then by creation sequence, which is the spec's index order. Each tick they
+; are permuted into the new cells' order (mostly the identity: few entities
+; change cell in a tick, so every pass streams memory in order), and the sorted
+; views (sim_sorted_x/z/id) are the live columns themselves, ids the identity.
 ;
 ; The cells are split into GRID_BANDS bands of BAND_ROWS whole rows. The
 ; entities are binned by band once, then each band is sorted on its own, so
@@ -123,7 +129,13 @@ done:
     ret
 }
 
-; r8d: band. Counting sort of the band's ids into the sorted arrays.
+; r8d: band. The band's entities into grid order, in the spare columns:
+;   count, prefix     the band's cell counters, from the band's base slot
+;   scatter           ids only (and each slot's cell), ids descending
+;   order             creation order within each cell, on the id column: a
+;                     cell that took entities from different old cells can
+;                     be out of sequence; such ids bubble down
+;   gather            the live columns, slot by slot (sequential writes)
 grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     push rbx
     push rsi
@@ -133,6 +145,7 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     push r14
     push r15
     push rbp
+    sub rsp, 24                        ; [rsp] base slot, [rsp + 4] count, [rsp + 8] end slot
     mov ebx, r8d
     mov r9d, ebx
     shl r9d, BAND_SHIFT                ; lo cell
@@ -146,11 +159,14 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     jnz zeroed
         mov dword ptr [rsi], 0
     zeroed:
-    ; the band's ids: band_ids[base .. base + n)
     lea rax, band_offset
     mov r12d, dword ptr [rax + rbx*4]  ; base
     lea rax, band_total
     mov r13d, dword ptr [rax + rbx*4]  ; n
+    mov dword ptr [rsp], r12d
+    mov dword ptr [rsp + 4], r13d
+    lea eax, [r12 + r13]
+    mov dword ptr [rsp + 8], eax
     mov rbp, sim_band_ids
     lea rbp, [rbp + r12*4]
     mov r10, sim_cell
@@ -175,29 +191,101 @@ prefix:
     inc eax
     cmp eax, BAND_CELLS
     jb prefix
-    ; scatter, ids descending: each cell's run comes out ascending
-    mov r11, sim_pos_x
-    mov r12, sim_pos_z
-    mov r14, sim_sorted_x
-    mov r15, sim_sorted_z
-    mov rdi, sim_sorted_id
+    ; scatter ids (descending): each cell's run in storage order
+    mov r11, sim_slot_id
+    mov r14, sim_slot_cell
     mov ecx, r13d
 scatter:
     test ecx, ecx
     jz scattered
     dec ecx
-    mov r8d, dword ptr [rbp + rcx*4]   ; id
+    mov r8d, dword ptr [rbp + rcx*4]   ; storage index
     mov edx, dword ptr [r10 + r8*4]    ; c
     mov eax, dword ptr [rsi + rdx*4 + 4]
     dec eax
     mov dword ptr [rsi + rdx*4 + 4], eax
-    mov ebx, dword ptr [r11 + r8*4]
-    mov dword ptr [r14 + rax*4], ebx
-    mov ebx, dword ptr [r12 + r8*4]
-    mov dword ptr [r15 + rax*4], ebx
-    mov dword ptr [rdi + rax*4], r8d
+    mov dword ptr [r11 + rax*4], r8d
+    mov dword ptr [r14 + rax*4], edx
     jmp scatter
 scattered:
+    ; creation order within each cell
+    mov r15, sim_seq
+    lea ecx, [r12 + 1]
+    mov edi, dword ptr [rsp + 8]
+order:
+    cmp ecx, edi
+    jae ordered
+    mov eax, dword ptr [r14 + rcx*4]
+    cmp eax, dword ptr [r14 + rcx*4 - 4]
+    jne next_slot
+    mov eax, dword ptr [r11 + rcx*4]
+    mov eax, dword ptr [r15 + rax*4]
+    mov edx, dword ptr [r11 + rcx*4 - 4]
+    cmp eax, dword ptr [r15 + rdx*4]
+    ja next_slot
+    mov edx, ecx
+bubble:
+    mov eax, dword ptr [r11 + rdx*4]
+    mov r8d, dword ptr [r11 + rdx*4 - 4]
+    mov dword ptr [r11 + rdx*4], r8d
+    mov dword ptr [r11 + rdx*4 - 4], eax
+    dec edx
+    cmp edx, r12d
+    jbe next_slot
+    mov eax, dword ptr [r14 + rdx*4]
+    cmp eax, dword ptr [r14 + rdx*4 - 4]
+    jne next_slot
+    mov eax, dword ptr [r11 + rdx*4]
+    mov eax, dword ptr [r15 + rax*4]
+    mov r8d, dword ptr [r11 + rdx*4 - 4]
+    cmp eax, dword ptr [r15 + r8*4]
+    jb bubble
+next_slot:
+    inc ecx
+    jmp order
+ordered:
+    ; gather, three columns per pass
+    mov rbx, sim_pos_x
+    mov rsi, sim_pos_x2
+    mov rdi, sim_pos_z
+    mov rbp, sim_pos_z2
+    mov r8, sim_vel_x
+    mov r9, sim_vel_x2
+    mov ecx, dword ptr [rsp]
+gather_a:
+    cmp ecx, dword ptr [rsp + 8]
+    jae gathered_a
+    mov eax, dword ptr [r11 + rcx*4]
+    mov edx, dword ptr [rbx + rax*4]
+    mov dword ptr [rsi + rcx*4], edx
+    mov edx, dword ptr [rdi + rax*4]
+    mov dword ptr [rbp + rcx*4], edx
+    mov edx, dword ptr [r8 + rax*4]
+    mov dword ptr [r9 + rcx*4], edx
+    inc ecx
+    jmp gather_a
+gathered_a:
+    mov rbx, sim_vel_z
+    mov rsi, sim_vel_z2
+    mov rdi, sim_hp
+    mov rbp, sim_hp2
+    mov r8, sim_seq
+    mov r9, sim_seq2
+    mov ecx, dword ptr [rsp]
+gather_b:
+    cmp ecx, dword ptr [rsp + 8]
+    jae gathered_b
+    mov eax, dword ptr [r11 + rcx*4]
+    mov edx, dword ptr [rbx + rax*4]
+    mov dword ptr [rsi + rcx*4], edx
+    mov edx, dword ptr [rdi + rax*4]
+    mov dword ptr [rbp + rcx*4], edx
+    mov edx, dword ptr [r8 + rax*4]
+    mov dword ptr [r9 + rcx*4], edx
+    inc ecx
+    jmp gather_b
+gathered_b:
+    add rsp, 24
     pop rbp
     pop r15
     pop r14
@@ -210,11 +298,23 @@ scattered:
 }
 
 ; The whole grid build on the pool.
+grid_stage_cyc: [4]u64 = {}
+
+; rdtsc into rax
+grid_stamp: proc() = {
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    ret
+}
+
 sim_grid_mt: proc() = {
     push rbx
     push rsi
     push rdi
     sub rsp, 32                        ; 8 + 24 + 32 = 64
+    call grid_stamp
+    mov qword ptr [rsp + 24], rax
     mov rcx, grid_bin_job&
     mov edx, sim_count
     mov r8d, BIN_CHUNK
@@ -250,19 +350,64 @@ chunks_done:
     inc ebx
     cmp ebx, GRID_BANDS
     jb bands
+    call grid_stamp
+    mov rcx, rax
+    sub rcx, qword ptr [rsp + 24]
+    add grid_stage_cyc[0], rcx
+    mov qword ptr [rsp + 24], rax
     mov rcx, grid_bucket_job&
     mov edx, sim_count
     mov r8d, BIN_CHUNK
     call pool_dispatch
+    call grid_stamp
+    mov rcx, rax
+    sub rcx, qword ptr [rsp + 24]
+    add grid_stage_cyc[8], rcx
+    mov qword ptr [rsp + 24], rax
     mov rcx, grid_band_job&
     mov edx, GRID_BANDS
     mov r8d, 1
     call pool_dispatch
+    call grid_stamp
+    mov rcx, rax
+    sub rcx, qword ptr [rsp + 24]
+    add grid_stage_cyc[16], rcx
     ; the end of the last cell
     mov rax, sim_cell_arr
     mov edx, sim_count
     mov ecx, GRID_CELLS + 1
     mov dword ptr [rax + rcx*4], edx
+    ; the grid-ordered columns become the live ones; the sorted views are them
+    mov rax, sim_pos_x
+    mov rcx, sim_pos_x2
+    mov sim_pos_x, rcx
+    mov sim_pos_x2, rax
+    mov rax, sim_pos_z
+    mov rcx, sim_pos_z2
+    mov sim_pos_z, rcx
+    mov sim_pos_z2, rax
+    mov rax, sim_vel_x
+    mov rcx, sim_vel_x2
+    mov sim_vel_x, rcx
+    mov sim_vel_x2, rax
+    mov rax, sim_vel_z
+    mov rcx, sim_vel_z2
+    mov sim_vel_z, rcx
+    mov sim_vel_z2, rax
+    mov rax, sim_hp
+    mov rcx, sim_hp2
+    mov sim_hp, rcx
+    mov sim_hp2, rax
+    mov rax, sim_seq
+    mov rcx, sim_seq2
+    mov sim_seq, rcx
+    mov sim_seq2, rax
+    mov rax, sim_pos_x
+    mov sim_sorted_x, rax
+    mov rax, sim_pos_z
+    mov sim_sorted_z, rax
+    mov rax, sim_identity
+    mov sim_sorted_id, rax
     add rsp, 32
     pop rdi
     pop rsi

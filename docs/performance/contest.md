@@ -66,7 +66,9 @@ adds on top of the same design.
 |---|---:|---:|---:|---:|---:|---:|
 | round 1 (asm) | 1434 | 502 | 15328 | 3572 | 84999 | 7186 |
 | lanes = entities separation | 1139 | 491 | 16410 | 3554 | 40349 | 4151 |
+| storage in grid order | 1255 | 442 | 16434 | 3004 | 40700 | 4407 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
 
-Next from the list: the grid kept in order between ticks and the fused band
-pass (ideas 1 to 3), which is where the 16-thread gap is.
+Left from the list: the incremental rebuild (idea 2) and the fused band pass
+(idea 3). The grid build is memory-bound now (log, 2026-11-07), and those two
+are what remove its traffic.

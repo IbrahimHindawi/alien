@@ -506,6 +506,10 @@ retry:
     mov rax, sim_hp
     mov edx, g_spawn_hp
     mov dword ptr [rax + rcx*4], edx
+    mov rax, sim_seq
+    mov edx, sim_next_seq
+    mov dword ptr [rax + rcx*4], edx
+    inc sim_next_seq
     inc sim_count
     inc spawned
     dec ebx

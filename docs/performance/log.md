@@ -162,3 +162,33 @@ Single-threaded the full copy costs the same as the old partial scalar copy
 
 **Kept.** The remaining gap at 16 threads is the layout: the rival keeps the
 entities in grid order and fuses grid, separation and integration per band.
+
+## 2026-11-07: storage in grid order (kept; contest round 2, idea 2)
+
+- **Idea** (the C rival's): keep the live columns (pos, vel, hp and a new
+  creation sequence `seq`) sorted by (cell, seq) instead of by index. The
+  spec's index order is creation order (stable removal, appending spawns),
+  so (cell, seq) is exactly the spec's neighbour order, and the hash and the
+  state dump gather the columns in seq order first (`sim_index_gather`).
+- **Change**: the band job of the binned grid now permutes the live columns
+  into the spare ones (ids scattered, then creation order repaired within
+  cells on the id column, then the six columns gathered slot by slot); the
+  sorted views are the live columns themselves and ids are the identity, so
+  separation, integration, projectiles and contact read in order with no
+  indirection. Compaction moves seq too; spawns take the next seq.
+- **Correctness**: self test `grid-ordered storage equals sim_grid,
+  crowded`; every reference hash at 1 and 16 threads; the contest's recorded
+  1M hashes.
+
+| 16 threads | before us/tick | after | separate c/e before | after |
+|---|---:|---:|---:|---:|
+| 100k sparse | 491 | 442 | | |
+| 1M sparse | 3554 | 3004 | 6.3 | 3.0 |
+| 1M dense | 4151 | 4407 | 10.6 | 9.9 |
+
+The grid build is now the cost: at 1M, 16 threads, ~5.8M cycles per tick, of
+which the band jobs are 4.4M, and they are memory-bound (about 80 bytes per
+entity per tick through L3/DRAM at ~80 GB/s). 64 or 128 bands: within 5%.
+The rival's remaining advantages are exactly what removes that traffic: an
+incremental rebuild (stayers copied in runs, only movers placed) and fusing
+grid, separation and integration per band in cache-resident row buffers.

@@ -1,6 +1,6 @@
 ; simulation/compact_mt.rasm: removing the dead (spec 4.5 Deaths), on the pool
 ;
-; Stable compaction of pos, vel and hp, out of place:
+; Stable compaction of pos, vel, hp and seq, out of place:
 ;
 ;   count     (chunks)        survivors per chunk (8 lanes per compare, popcnt)
 ;   offsets   (main thread)   exclusive prefixes of survivors and of deaths
@@ -30,6 +30,7 @@ sim_pos_z2: *f32 = 0
 sim_vel_x2: *f32 = 0
 sim_vel_z2: *f32 = 0
 sim_hp2: *f32 = 0
+sim_seq2: *u32 = 0
 
 ; ecx: begin (a multiple of 8), edx: end, r8d: chunk
 compact_count_job: proc(begin: u32, end: u32, chunk: u32) = {
@@ -155,6 +156,10 @@ no_dead:
     mov r14, sim_hp2
     vpermps ymm1, ymm4, ymmword ptr [r9 + rsi*4]
     vmovups ymmword ptr [r14 + rbx*4], ymm1
+    mov r13, sim_seq
+    mov r14, sim_seq2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
+    vmovups ymmword ptr [r14 + rbx*4], ymm1
     jmp stored
 masked:
     ; near the end of the chunk's output: write only the survivors' lanes
@@ -180,6 +185,10 @@ masked:
     vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
     mov r14, sim_hp2
     vpermps ymm1, ymm4, ymmword ptr [r9 + rsi*4]
+    vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
+    mov r13, sim_seq
+    mov r14, sim_seq2
+    vpermps ymm1, ymm4, ymmword ptr [r13 + rsi*4]
     vmaskmovps ymmword ptr [r14 + rbx*4], ymm3, ymm1
 stored:
     add ebx, r12d
@@ -267,6 +276,10 @@ prefixed:
     mov rcx, sim_hp2
     mov sim_hp, rcx
     mov sim_hp2, rax
+    mov rax, sim_seq
+    mov rcx, sim_seq2
+    mov sim_seq, rcx
+    mov sim_seq2, rax
     add kills, esi
     mov sim_count, ebx
     mov eax, death_count

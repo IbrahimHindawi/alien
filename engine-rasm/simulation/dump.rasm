@@ -52,13 +52,14 @@ sim_dump: proc(path: *const u8) = {
     mov eax, spawned
     mov dword ptr [rbx + 40], eax
     invoke(dump_column, dump_header&, 48)
+    call sim_index_gather              ; columns in index order, as the reference model has them
     mov esi, sim_count
     shl esi, 2
-    invoke(dump_column, sim_pos_x, rsi)
-    invoke(dump_column, sim_pos_z, rsi)
-    invoke(dump_column, sim_vel_x, rsi)
-    invoke(dump_column, sim_vel_z, rsi)
-    invoke(dump_column, sim_hp, rsi)
+    invoke(dump_column, gx_pos_x, rsi)
+    invoke(dump_column, gx_pos_z, rsi)
+    invoke(dump_column, gx_vel_x, rsi)
+    invoke(dump_column, gx_vel_z, rsi)
+    invoke(dump_column, gx_hp, rsi)
     mov esi, proj_count
     shl esi, 2
     invoke(dump_column, proj_x&, rsi)

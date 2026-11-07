@@ -36,6 +36,24 @@ sim_cell_start: *u32 = 0               ; sim_cell_arr + 1: start of cell c at [c
 sim_sorted_x: *f32 = 0
 sim_sorted_z: *f32 = 0
 sim_sorted_id: *u32 = 0
+; Storage is kept in grid order (cell, then creation sequence); the spec's
+; index order is creation order (stable removal, spawns append), so sim_seq
+; recovers it where it matters: the hash and the state dump.
+#define ORDER_MAP_MAX 4194304
+sim_seq: *u32 = 0
+sim_next_seq: u32 = 0
+sim_slot_cell: *u32 = 0                ; cell of each slot, written by the grid build
+sim_slot_id: *u32 = 0                  ; storage index of each slot, the grid build's scratch
+sim_identity: *u32 = 0                 ; i at i: the id view of grid-ordered storage
+sim_sorted_x_own: *f32 = 0
+sim_sorted_z_own: *f32 = 0
+sim_sorted_id_own: *u32 = 0
+sim_order_map: *u32 = 0
+gx_pos_x: *f32 = 0                     ; the live columns gathered in index order
+gx_pos_z: *f32 = 0
+gx_vel_x: *f32 = 0
+gx_vel_z: *f32 = 0
+gx_hp: *f32 = 0
 
 ; random numbers: pcg32
 rng_state: u64 = 0
@@ -72,84 +90,135 @@ bench_aim: [8]const f32 = { 10.0, 0.0, 0.0, 10.0, -10.0, 0.0, 0.0, -10.0 }
 
 ; allocation ---------------------------------------------------------------
 
-; Allocate every column for MAX_ENTITIES from arena_perm. -> eax 1 ok
+; Allocate every column from arena_perm. Columns have 16 slots of padding:
+; 8-lane reads at the end of the population stay inside them. -> eax 1 ok
 sim_alloc: proc() -> b32 = {
     push rbx
     sub rsp, 32
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_pos_x, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_pos_z, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_vel_x, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_vel_z, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_hp, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_seq, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_pos_x2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_pos_z2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_vel_x2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_vel_z2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_hp2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_seq2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_sep_x, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_sep_z, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
     mov sim_cell, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_slot_cell, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_slot_id, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_identity, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_sorted_x_own, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_sorted_z_own, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_sorted_id_own, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
+    mov sim_band_ids, rax
+    invoke(arena_push, arena_perm&, ORDER_MAP_MAX * 4)
+    test rax, rax
+    jz failed
+    mov sim_order_map, rax
     invoke(arena_push, arena_perm&, (GRID_CELLS + 8) * 4)
     test rax, rax
     jz failed
     mov sim_cell_arr, rax
     add rax, 4
     mov sim_cell_start, rax
-    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)    ; padding: 8-lane reads past the end
-    test rax, rax
-    jz failed
+    ; the identity view of ids: storage is in grid order, so slot = id
+    mov rax, sim_identity
+    xor ecx, ecx
+identity:
+    mov dword ptr [rax + rcx*4], ecx
+    inc ecx
+    cmp ecx, MAX_ENTITIES + 16
+    jb identity
+    ; sim_grid's own sorted columns (the reference build); the index-order
+    ; gather for the hash borrows scratch columns
+    mov rax, sim_sorted_x_own
     mov sim_sorted_x, rax
-    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
-    test rax, rax
-    jz failed
+    mov rax, sim_sorted_z_own
     mov sim_sorted_z, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
+    mov rax, sim_sorted_id_own
     mov sim_sorted_id, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_hp, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_band_ids, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_pos_x2, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_pos_z2, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_vel_x2, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_vel_z2, rax
-    invoke(arena_push, arena_perm&, MAX_ENTITIES * 4)
-    test rax, rax
-    jz failed
-    mov sim_hp2, rax
+    mov rax, sim_sep_x
+    mov gx_pos_x, rax
+    mov rax, sim_sep_z
+    mov gx_pos_z, rax
+    mov rax, sim_slot_cell
+    mov gx_vel_x, rax
+    mov rax, sim_sorted_x_own
+    mov gx_vel_z, rax
+    mov rax, sim_sorted_z_own
+    mov gx_hp, rax
     mov eax, 1
     jmp done
 failed:
@@ -278,9 +347,12 @@ again:
     mov dword ptr [rax + rsi*4], 0
     mov rax, sim_hp
     mov dword ptr [rax + rsi*4], 0x3F800000
+    mov rax, sim_seq
+    mov dword ptr [rax + rsi*4], esi
     inc esi
     jmp again
 done:
+    mov sim_next_seq, ebx
     movaps xmm6, xmmword ptr [rsp + 32]
     add rsp, 48
     pop rdi
@@ -372,6 +444,12 @@ sim_grid: proc() = {
     push rsi
     push rdi
     sub rsp, 32
+    mov rax, sim_sorted_x_own          ; the reference build fills its own columns
+    mov sim_sorted_x, rax
+    mov rax, sim_sorted_z_own
+    mov sim_sorted_z, rax
+    mov rax, sim_sorted_id_own
+    mov sim_sorted_id, rax
     ; 1. cell of every entity, 8 at a time (lanes past count are garbage, never read)
     mov rsi, sim_pos_x
     mov rdi, sim_pos_z
@@ -695,13 +773,7 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_hero, rcx
     mov rbx, rax
-    cmp pool_workers, 0
-    je grid_alone
-        call sim_grid_mt               ; binned by band, then a counting sort per band
-        jmp grid_done
-    grid_alone:
-        call sim_grid
-    grid_done:
+    call sim_grid_mt                   ; storage into grid order, binned by band
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -823,10 +895,82 @@ done:
 }
 
 ; -> rax: the spec's state hash
+; Gather the live columns in index (creation) order into gx_*. -> eax 1 ok,
+; 0 when more sequence numbers were handed out than the map holds (a very
+; long game; the hash is for benches and tests).
+sim_index_gather: proc() -> b32 = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32
+    mov ecx, sim_next_seq
+    cmp ecx, ORDER_MAP_MAX
+    ja too_many
+    mov rdi, sim_order_map
+    mov eax, -1
+    rep stosd
+    mov rsi, sim_seq
+    mov rdi, sim_order_map
+    xor ecx, ecx
+map:
+    cmp ecx, sim_count
+    jae mapped
+    mov eax, dword ptr [rsi + rcx*4]
+    mov dword ptr [rdi + rax*4], ecx
+    inc ecx
+    jmp map
+mapped:
+    xor ecx, ecx                       ; sequence number
+    xor ebx, ebx                       ; index
+walk:
+    cmp ecx, sim_next_seq
+    jae walked
+    mov eax, dword ptr [rdi + rcx*4]
+    cmp eax, -1
+    je next
+    mov r8, sim_pos_x
+    mov r9d, dword ptr [r8 + rax*4]
+    mov r8, gx_pos_x
+    mov dword ptr [r8 + rbx*4], r9d
+    mov r8, sim_pos_z
+    mov r9d, dword ptr [r8 + rax*4]
+    mov r8, gx_pos_z
+    mov dword ptr [r8 + rbx*4], r9d
+    mov r8, sim_vel_x
+    mov r9d, dword ptr [r8 + rax*4]
+    mov r8, gx_vel_x
+    mov dword ptr [r8 + rbx*4], r9d
+    mov r8, sim_vel_z
+    mov r9d, dword ptr [r8 + rax*4]
+    mov r8, gx_vel_z
+    mov dword ptr [r8 + rbx*4], r9d
+    mov r8, sim_hp
+    mov r9d, dword ptr [r8 + rax*4]
+    mov r8, gx_hp
+    mov dword ptr [r8 + rbx*4], r9d
+    inc ebx
+next:
+    inc ecx
+    jmp walk
+walked:
+    mov eax, 1
+    jmp done
+too_many:
+    invoke(print, "index order: %u sequence numbers exceed the map\n", rcx)
+    xor eax, eax
+done:
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
 sim_hash: proc() -> u64 = {
     push rbx
     push rsi
     sub rsp, 40
+    call sim_index_gather
     mov rbx, 0xcbf29ce484222325
     mov esi, sim_count
     shl rsi, 2                         ; bytes per column
@@ -834,11 +978,11 @@ sim_hash: proc() -> u64 = {
     invoke(fnv1a, sim_tick&, 4, rax)
     invoke(fnv1a, hero_x&, 4, rax)
     invoke(fnv1a, hero_z&, 4, rax)
-    invoke(fnv1a, sim_pos_x, rsi, rax)
-    invoke(fnv1a, sim_pos_z, rsi, rax)
-    invoke(fnv1a, sim_vel_x, rsi, rax)
-    invoke(fnv1a, sim_vel_z, rsi, rax)
-    invoke(fnv1a, sim_hp, rsi, rax)
+    invoke(fnv1a, gx_pos_x, rsi, rax)
+    invoke(fnv1a, gx_pos_z, rsi, rax)
+    invoke(fnv1a, gx_vel_x, rsi, rax)
+    invoke(fnv1a, gx_vel_z, rsi, rax)
+    invoke(fnv1a, gx_hp, rsi, rax)
     invoke(fnv1a, hero_hp&, 4, rax)
     invoke(fnv1a, hero_alive&, 4, rax)
     invoke(fnv1a, kills&, 4, rax)
