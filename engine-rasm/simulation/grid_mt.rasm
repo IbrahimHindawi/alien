@@ -505,7 +505,59 @@ ordered:
     mov r15, sim_seq
     mov rdx, sim_seq2
     mov ecx, dword ptr [rsp]
+    vmovdqa ymm2, ymmword ptr k_iota
 gather:
+    ; a block of 8 slots whose ids run consecutively (stayers, mostly) is
+    ; copied as vectors; else slot by slot
+    mov eax, dword ptr [rsp + 8]
+    sub eax, ecx
+    cmp eax, 8
+    jb gather_one
+    vmovdqu ymm0, ymmword ptr [r11 + rcx*4]
+    vpbroadcastd ymm1, xmm0
+    vpaddd ymm1, ymm1, ymm2
+    vpcmpeqd ymm1, ymm1, ymm0
+    vmovmskps eax, ymm1
+    cmp eax, 255
+    jne gather_eight
+    vmovd eax, xmm0
+    vmovups ymm1, ymmword ptr [rbx + rax*4]
+    vmovups ymmword ptr [rsi + rcx*4], ymm1
+    vmovups ymm1, ymmword ptr [rdi + rax*4]
+    vmovups ymmword ptr [rbp + rcx*4], ymm1
+    vmovups ymm1, ymmword ptr [r8 + rax*4]
+    vmovups ymmword ptr [r9 + rcx*4], ymm1
+    vmovups ymm1, ymmword ptr [r10 + rax*4]
+    vmovups ymmword ptr [r12 + rcx*4], ymm1
+    vmovups ymm1, ymmword ptr [r13 + rax*4]
+    vmovups ymmword ptr [r14 + rcx*4], ymm1
+    vmovups ymm1, ymmword ptr [r15 + rax*4]
+    vmovups ymmword ptr [rdx + rcx*4], ymm1
+    add ecx, 8
+    jmp gather
+gather_eight:
+    mov eax, ecx
+    add eax, 8
+    mov dword ptr [rsp + 32], eax
+gather_slot:
+    mov eax, dword ptr [r11 + rcx*4]
+    vmovd xmm0, dword ptr [rbx + rax*4]
+    vmovd dword ptr [rsi + rcx*4], xmm0
+    vmovd xmm0, dword ptr [rdi + rax*4]
+    vmovd dword ptr [rbp + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r8 + rax*4]
+    vmovd dword ptr [r9 + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r10 + rax*4]
+    vmovd dword ptr [r12 + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r13 + rax*4]
+    vmovd dword ptr [r14 + rcx*4], xmm0
+    vmovd xmm0, dword ptr [r15 + rax*4]
+    vmovd dword ptr [rdx + rcx*4], xmm0
+    inc ecx
+    cmp ecx, dword ptr [rsp + 32]
+    jb gather_slot
+    jmp gather
+gather_one:
     cmp ecx, dword ptr [rsp + 8]
     jae gathered_b
     mov eax, dword ptr [r11 + rcx*4]
@@ -522,8 +574,9 @@ gather:
     vmovd xmm0, dword ptr [r15 + rax*4]
     vmovd dword ptr [rdx + rcx*4], xmm0
     inc ecx
-    jmp gather
+    jmp gather_one
 gathered_b:
+    vzeroupper
     ; fused: the band's interior rows (lo + 1 .. lo + 6) need only the band's
     ; own rows, which this thread has just written: separate and integrate
     ; them now, while they are in its cache
