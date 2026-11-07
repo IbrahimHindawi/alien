@@ -509,6 +509,8 @@ retry:
     mov rax, sim_seq
     mov edx, sim_next_seq
     mov dword ptr [rax + rcx*4], edx
+    mov rax, sim_slot_cell
+    mov dword ptr [rax + rcx*4], -1    ; no old cell: a mover at the next build
     inc sim_next_seq
     inc sim_count
     inc sim_alive

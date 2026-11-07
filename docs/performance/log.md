@@ -234,3 +234,23 @@ memory traffic.
 
 **Kept.** (The overlay's GPU figure includes the wait for the display when
 vsync is on; uncapped it is about 1 ms at 64k visible.)
+
+## 2026-11-07: incremental grid rebuild (kept, small)
+
+- **Change**: stayers (cell unchanged) keep their order, found by binary
+  search on the old cells and placed by a sequential scan; only movers (and
+  spawns, marked with old cell -1) are bucketed, placed ahead of each cell's
+  stayers and slid forward by sequence. The full-population bucket and the
+  order repair over every slot are gone.
+- **Correctness**: the self test against sim_grid, every reference hash.
+
+| | before us/tick | after |
+|---|---:|---:|
+| 1M sparse, 1 thread | 15639 | 14880 |
+| 1M sparse, 16 threads | 2481 | 2390 |
+
+Small: the band stage stays ~4.6M cycles per tick at 16 threads. Its cost is
+moving six columns of every entity through memory, not placing them. What is
+left of the gap is the number of passes over memory per tick (bin, build,
+separate: about three), against the rival's one (build rows into cache-sized
+buffers, separate and integrate them while they are there).

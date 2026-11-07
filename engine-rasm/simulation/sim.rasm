@@ -163,6 +163,10 @@ sim_alloc: proc() -> b32 = {
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
+    mov sim_slot_cell2, rax
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    test rax, rax
+    jz failed
     mov sim_slot_id, rax
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
@@ -351,6 +355,8 @@ again:
     mov dword ptr [rax + rsi*4], 0x3F800000
     mov rax, sim_seq
     mov dword ptr [rax + rsi*4], esi
+    mov rax, sim_slot_cell
+    mov dword ptr [rax + rsi*4], -1    ; no old cell: the first build places everyone
     inc esi
     jmp again
 done:

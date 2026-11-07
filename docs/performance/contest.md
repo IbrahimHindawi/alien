@@ -69,6 +69,7 @@ adds on top of the same design.
 | storage in grid order | 1255 | 442 | 16434 | 3004 | 40700 | 4407 |
 | separation + integration fused | 1228 | 400 | 15907 | 2752 | 40569 | 3857 |
 | the dead left to the next build | 1282 | 357 | 15639 | 2481 | 41504 | 3928 |
+| incremental rebuild | 1391 | 375 | 14880 | 2390 | 42030 | 3974 |
 | C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
 
 Left from the list: the incremental rebuild (idea 2) and the fused band pass
