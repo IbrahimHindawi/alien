@@ -781,10 +781,19 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_grid, rcx
     mov rbx, rax
-    mov rcx, sim_separate_v3&
+    mov rcx, sim_separate_v4&          ; separation and integration, fused
     mov edx, sim_count
     mov r8d, 2048
     call pool_dispatch
+    ; the integrated positions become the live ones
+    mov rax, sim_pos_x
+    mov rcx, sim_pos_x2
+    mov sim_pos_x, rcx
+    mov sim_pos_x2, rax
+    mov rax, sim_pos_z
+    mov rcx, sim_pos_z2
+    mov sim_pos_z, rcx
+    mov sim_pos_z2, rax
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -792,10 +801,7 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_separate, rcx
     mov rbx, rax
-    mov rcx, sim_integrate&
-    mov edx, sim_count
-    mov r8d, 16384
-    call pool_dispatch
+    ; (integration is fused into separation)
     rdtsc
     shl rdx, 32
     or rax, rdx

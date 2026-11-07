@@ -192,3 +192,21 @@ entity per tick through L3/DRAM at ~80 GB/s). 64 or 128 bands: within 5%.
 The rival's remaining advantages are exactly what removes that traffic: an
 incremental rebuild (stayers copied in runs, only movers placed) and fusing
 grid, separation and integration per band in cache-resident row buffers.
+
+## 2026-11-07: separation and integration fused (kept; contest round 2, idea 3, part 1)
+
+- **Change** (`separate_v4.rasm`): when a lanes-kernel group has its sums, the
+  same 8 slots are integrated at once with sim_integrate's operations in the
+  same order; new positions go to the spare columns (other groups still read
+  start positions), velocities in place, short groups through a lane mask.
+  No sep columns and no second pass over the population.
+- **Correctness**: every reference hash, the contest's recorded hashes.
+
+| 16 threads | before us/tick | after |
+|---|---:|---:|
+| 100k sparse | 442 | 400 |
+| 1M sparse | 3004 | 2752 |
+| 1M dense | 4407 | 3857 |
+
+**Kept.** Next: the incremental grid rebuild, which removes most of the grid's
+memory traffic.

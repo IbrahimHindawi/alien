@@ -1,0 +1,214 @@
+; simulation/separate_v4.rasm: separation and integration fused (AVX2)
+;
+; sim_separate_v3's lanes = entities kernel; when a group of up to 8
+; consecutive slots has its separation sums, the same slots are integrated
+; right away (spec 4.4, sim_integrate's operations in the same order), while
+; their positions, velocities and sums are in registers. No sep columns, no
+; second pass over the population. New positions go to the spare position
+; columns, because other groups still read this tick's start positions;
+; velocities are written in place (separation never reads them). sim_step
+; swaps the position columns afterwards. A group shorter than 8 stores with
+; a lane mask, so groups never write each other's slots.
+
+; ecx: first sorted slot, edx: one past the last (a pool job)
+sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
+    push rbp
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 248                       ; 8 + 64 + 248 = 320; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes
+    movaps xmmword ptr [rsp + 64], xmm6
+    movaps xmmword ptr [rsp + 80], xmm7
+    movaps xmmword ptr [rsp + 96], xmm8
+    movaps xmmword ptr [rsp + 112], xmm9
+    movaps xmmword ptr [rsp + 128], xmm10
+    movaps xmmword ptr [rsp + 144], xmm11
+    movaps xmmword ptr [rsp + 160], xmm12
+    movaps xmmword ptr [rsp + 176], xmm13
+    movaps xmmword ptr [rsp + 192], xmm14
+    movaps xmmword ptr [rsp + 208], xmm15
+    mov r12, sim_sorted_x
+    mov r13, sim_sorted_z
+    mov r14, sim_sorted_id
+    mov r15, sim_cell_start
+    mov ebx, edx                       ; end
+    mov esi, ecx                       ; s: the group's first slot
+    vbroadcastss ymm14, k_one[0]
+    vmovdqa ymm15, ymmword ptr k_sep_cap
+group:
+    cmp esi, ebx
+    jae all_done
+    vmovups ymm0, ymmword ptr [r12 + rsi*4]        ; px of the lanes (columns padded by 16)
+    vmovups ymm1, ymmword ptr [r13 + rsi*4]        ; pz
+    ; the lanes' cells
+    vaddps ymm6, ymm1, ymmword ptr k_world_half
+    vmulps ymm6, ymm6, ymmword ptr k_inv_cell
+    vcvttps2dq ymm6, ymm6                          ; cz
+    vaddps ymm7, ymm0, ymmword ptr k_world_half
+    vmulps ymm7, ymm7, ymmword ptr k_inv_cell
+    vcvttps2dq ymm7, ymm7                          ; cx
+    ; the group: the leading lanes in lane 0's row, and before `end`
+    vpbroadcastd ymm8, xmm6
+    vpcmpeqd ymm8, ymm8, ymm6
+    vmovmskps eax, ymm8
+    not eax
+    or eax, 256
+    tzcnt eax, eax
+    mov edx, ebx
+    sub edx, esi
+    cmp eax, edx
+    cmova eax, edx                     ; k lanes, 1..8
+    mov dword ptr [rsp + 224], eax
+    shl eax, 5
+    lea rdx, k_lane_valid
+    vmovdqa ymm5, ymmword ptr [rdx + rax]          ; valid lanes
+    vmovd xmm13, esi
+    vpbroadcastd ymm13, xmm13
+    vpaddd ymm13, ymm13, ymmword ptr k_iota        ; the lanes' slots
+    ; window columns: first lane's cx - 1 .. last lane's cx + 1, clamped
+    vmovdqu ymmword ptr [rsp], ymm7
+    mov eax, dword ptr [rsp + 224]
+    mov ecx, dword ptr [rsp]
+    mov edx, dword ptr [rsp + rax*4 - 4]
+    lea r11d, [rcx - 1]
+    xor eax, eax
+    test r11d, r11d
+    cmovs r11d, eax                    ; lo column
+    lea ebp, [rdx + 1]
+    mov eax, GRID_DIM - 1
+    cmp ebp, eax
+    cmova ebp, eax                     ; hi column
+    vmovd edi, xmm6
+    dec edi                            ; first row
+    mov r9d, 3
+    vxorps ymm2, ymm2, ymm2            ; sx
+    vxorps ymm3, ymm3, ymm3            ; sz
+    vpxor ymm4, ymm4, ymm4             ; hits per lane
+row:
+    cmp edi, GRID_DIM
+    jae next_row
+    mov ecx, edi
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov r8d, dword ptr [r15 + rcx*4]   ; the row's run of the window
+    mov r10d, dword ptr [r15 + rdx*4]
+candidate:
+    cmp r8d, r10d
+    jae next_row
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6                        ; dx = px - x
+    vsubps ymm9, ymm1, ymm7                        ; dz
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11                     ; d2
+    vcmpps ymm11, ymm10, ymm14, 17                 ; d2 < 1 (LT_OQ)
+    vmovd xmm12, r8d
+    vpbroadcastd ymm12, xmm12
+    vpcmpeqd ymm12, ymm12, ymm13                   ; the lane itself
+    vpandn ymm11, ymm12, ymm11
+    vpcmpgtd ymm12, ymm15, ymm4                    ; fewer than 16 hits so far
+    vpand ymm11, ymm11, ymm12
+    vpand ymm11, ymm11, ymm5
+    vsubps ymm10, ymm14, ymm10                     ; w = 1 - d2
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vandps ymm8, ymm8, ymm11
+    vandps ymm9, ymm9, ymm11
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11                       ; hit lanes are -1
+    inc r8d
+    jmp candidate
+next_row:
+    inc edi
+    dec r9d
+    jnz row
+    ; integrate the group's own entities now (spec 4.4, the operations of
+    ; sim_integrate in the same order): positions to the spare columns, as
+    ; other groups still read this tick's start positions; velocities in place
+    vbroadcastss ymm6, hero_x
+    vsubps ymm6, ymm6, ymm0                        ; dx = hero - px
+    vbroadcastss ymm7, hero_z
+    vsubps ymm7, ymm7, ymm1                        ; dz
+    vmulps ymm8, ymm6, ymm6
+    vmulps ymm9, ymm7, ymm7
+    vaddps ymm8, ymm8, ymm9                        ; d2
+    vcmpps ymm9, ymm8, ymmword ptr k_stop, 30      ; d2 > STOP_R2
+    vblendvps ymm8, ymm14, ymm8, ymm9              ; 1.0 where masked out
+    vsqrtps ymm8, ymm8
+    vdivps ymm8, ymm14, ymm8                       ; inv
+    vmulps ymm6, ymm6, ymm8
+    vmulps ymm6, ymm6, ymmword ptr k_speed         ; tx = (dx * inv) * speed
+    vmulps ymm7, ymm7, ymm8
+    vmulps ymm7, ymm7, ymmword ptr k_speed
+    vandps ymm6, ymm6, ymm9
+    vandps ymm7, ymm7, ymm9
+    vmulps ymm10, ymm2, ymmword ptr k_sep
+    vaddps ymm6, ymm6, ymm10                       ; tx + sep_x * 6
+    vmulps ymm10, ymm3, ymmword ptr k_sep
+    vaddps ymm7, ymm7, ymm10
+    mov r9, sim_vel_x
+    mov r10, sim_vel_z
+    vmovups ymm10, ymmword ptr [r9 + rsi*4]        ; vel_x
+    vsubps ymm6, ymm6, ymm10
+    vmulps ymm6, ymm6, ymmword ptr k_steer
+    vaddps ymm6, ymm10, ymm6                       ; vx
+    vmovups ymm11, ymmword ptr [r10 + rsi*4]
+    vsubps ymm7, ymm7, ymm11
+    vmulps ymm7, ymm7, ymmword ptr k_steer
+    vaddps ymm7, ymm11, ymm7                       ; vz
+    vmulps ymm8, ymm6, ymmword ptr k_dt
+    vaddps ymm8, ymm8, ymm0                        ; nx = vx * dt + pos
+    vmulps ymm9, ymm7, ymmword ptr k_dt
+    vaddps ymm9, ymm9, ymm1
+    vmaxps ymm8, ymm8, ymmword ptr k_lo
+    vminps ymm8, ymm8, ymmword ptr k_hi
+    vmaxps ymm9, ymm9, ymmword ptr k_lo
+    vminps ymm9, ymm9, ymmword ptr k_hi
+    mov r11, sim_pos_x2
+    mov r8, sim_pos_z2
+    mov ecx, dword ptr [rsp + 224]
+    cmp ecx, 8
+    jb partial
+    vmovups ymmword ptr [r9 + rsi*4], ymm6
+    vmovups ymmword ptr [r10 + rsi*4], ymm7
+    vmovups ymmword ptr [r11 + rsi*4], ymm8
+    vmovups ymmword ptr [r8 + rsi*4], ymm9
+    jmp written
+partial:
+    vmaskmovps ymmword ptr [r9 + rsi*4], ymm5, ymm6
+    vmaskmovps ymmword ptr [r10 + rsi*4], ymm5, ymm7
+    vmaskmovps ymmword ptr [r11 + rsi*4], ymm5, ymm8
+    vmaskmovps ymmword ptr [r8 + rsi*4], ymm5, ymm9
+written:
+    add esi, ecx
+    jmp group
+all_done:
+    vzeroupper
+    movaps xmm6, xmmword ptr [rsp + 64]
+    movaps xmm7, xmmword ptr [rsp + 80]
+    movaps xmm8, xmmword ptr [rsp + 96]
+    movaps xmm9, xmmword ptr [rsp + 112]
+    movaps xmm10, xmmword ptr [rsp + 128]
+    movaps xmm11, xmmword ptr [rsp + 144]
+    movaps xmm12, xmmword ptr [rsp + 160]
+    movaps xmm13, xmmword ptr [rsp + 176]
+    movaps xmm14, xmmword ptr [rsp + 192]
+    movaps xmm15, xmmword ptr [rsp + 208]
+    add rsp, 248
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    pop rbp
+    ret
+}
