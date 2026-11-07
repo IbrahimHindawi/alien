@@ -374,6 +374,33 @@ separated:
     mov ecx, dword ptr [rsp + 224]
     mov r14, fz_cell
     mov r11, fz_slot_cell
+    ; the usual case, all lanes in one band: one store, two popcounts
+    vpsrld ymm11, ymm10, BAND_SHIFT
+    vpbroadcastd ymm12, xmm11
+    vpcmpeqd ymm12, ymm12, ymm11
+    vmovmskps eax, ymm12
+    vmovmskps edx, ymm5
+    and eax, edx
+    cmp eax, edx
+    jne cell_lanes                     ; the group spans bands: lane by lane
+    cmp ecx, 8
+    jb cells_masked
+    vmovdqu ymmword ptr [r14 + rsi*4], ymm10
+    jmp cells_stored
+cells_masked:
+    vpmaskmovd ymmword ptr [r14 + rsi*4], ymm5, ymm10
+cells_stored:
+    vmovd edi, xmm11
+    popcnt eax, edx
+    add dword ptr [rsp + rdi*4 + 288], eax
+    vmovdqu ymm12, ymmword ptr [r11 + rsi*4]       ; the slots' cells as of this build
+    vpcmpeqd ymm12, ymm12, ymm10
+    vmovmskps eax, ymm12
+    andn eax, eax, edx                 ; valid lanes that changed cell
+    popcnt eax, eax
+    add dword ptr [rsp + rdi*4 + 800], eax
+    jmp cells_counted
+cell_lanes:
     xor edx, edx
 cell_lane:
     mov eax, dword ptr [rsp + rdx*4]
@@ -389,6 +416,7 @@ cell_stays:
     inc edx
     cmp edx, ecx
     jb cell_lane
+cells_counted:
     mov r11, fz_out_x
     mov r8, fz_out_z
     mov ecx, dword ptr [rsp + 224]
