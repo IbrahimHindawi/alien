@@ -125,7 +125,7 @@ hud_draw: proc() = {
     call ui_text
     call ui_str_clear
     invoke(ui_str_cat, "ALIENS ")
-    mov ecx, sim_count
+    mov ecx, sim_alive
     call ui_str_u32
     invoke(ui_str_cat, "  VISIBLE ")
     mov ecx, instance_counts[0]

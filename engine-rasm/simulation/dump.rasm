@@ -29,7 +29,7 @@ sim_dump: proc(path: *const u8) = {
     je done
     mov dump_file, rax
     lea rbx, dump_header
-    mov eax, sim_count
+    mov eax, sim_alive
     mov dword ptr [rbx], eax
     mov eax, sim_tick
     mov dword ptr [rbx + 4], eax
@@ -53,7 +53,7 @@ sim_dump: proc(path: *const u8) = {
     mov dword ptr [rbx + 40], eax
     invoke(dump_column, dump_header&, 48)
     call sim_index_gather              ; columns in index order, as the reference model has them
-    mov esi, sim_count
+    mov esi, sim_alive
     shl esi, 2
     invoke(dump_column, gx_pos_x, rsi)
     invoke(dump_column, gx_pos_z, rsi)

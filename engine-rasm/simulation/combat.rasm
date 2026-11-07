@@ -456,8 +456,8 @@ sim_spawn: proc() = {
     movaps xmmword ptr [rsp + 32], xmm6
     movaps xmmword ptr [rsp + 48], xmm7
     mov eax, target_count
-    sub eax, sim_count
-    jbe done                           ; count >= target
+    sub eax, sim_alive
+    jbe done                           ; the living >= target
     mov ebx, SPAWN_PER_TICK
     cmp eax, ebx
     cmovb ebx, eax
@@ -511,6 +511,7 @@ retry:
     mov dword ptr [rax + rcx*4], edx
     inc sim_next_seq
     inc sim_count
+    inc sim_alive
     inc spawned
     dec ebx
     jmp one
@@ -530,7 +531,7 @@ sim_combat: proc() = {
     call sim_projectiles
     call sim_abilities
     call sim_contact
-    call sim_compact_mt
+    call sim_deaths_mt
     call sim_spawn
     add rsp, 40
     ret

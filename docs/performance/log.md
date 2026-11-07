@@ -210,3 +210,27 @@ grid, separation and integration per band in cache-resident row buffers.
 
 **Kept.** Next: the incremental grid rebuild, which removes most of the grid's
 memory traffic.
+
+## 2026-11-07: the dead are left to the next grid build (kept)
+
+- **Baseline**: with grid-ordered storage the compaction still moved all six
+  columns of every entity whenever anyone died (a few deaths per tick in the
+  bench: 24 MB per tick at 1M).
+- **Change**: the next tick's grid build copies every survivor anyway, so it
+  now skips the dead (no cell, not counted, not bucketed) and sets the new
+  population. Combat's deaths pass only counts the living (`sim_alive`, which
+  spawning uses) and the dead (kills), and emits the death events. Until the
+  build a dead entity stays in storage with hp <= 0, and every reader in
+  between ignores it (projectiles, contact, the hash gather, the dump). The
+  compress table is gone.
+- **Correctness**: every reference hash, the contest's recorded hashes; the
+  game runs with kills, gems and shards as before.
+
+| 16 threads | before us/tick | after |
+|---|---:|---:|
+| 100k sparse | 400 | 357 |
+| 1M sparse | 2752 | 2481 |
+| 1M dense | 3857 | 3928 (noise; few deaths) |
+
+**Kept.** (The overlay's GPU figure includes the wait for the display when
+vsync is on; uncapped it is about 1 ms at 64k visible.)

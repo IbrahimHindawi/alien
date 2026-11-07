@@ -34,6 +34,7 @@
 #define BIN_CHUNKS 64
 
 band_total: [GRID_BANDS]u32 = {}
+grid_live: u32 = 0
 band_offset: [GRID_BANDS]u32 = {}
 bin_hist: [8192]u32[align(64)] = {}    ; [chunk * GRID_BANDS + band]
 bin_off: [8192]u32[align(64)] = {}
@@ -87,14 +88,24 @@ cells:
     jnz cells
 cells_done:
     vzeroupper
-    ; band histogram (the cells are still in L1/L2)
+    ; band histogram (the cells are still in L1/L2); the dead of the last
+    ; tick get no cell and are left behind
+    mov r8, sim_hp
+    vxorps xmm1, xmm1, xmm1
     mov eax, ebx
 count:
     cmp eax, edi
     jae counted
+    vmovss xmm0, dword ptr [r8 + rax*4]
+    vcomiss xmm0, xmm1
+    jbe dead
     mov edx, dword ptr [r10 + rax*4]
     shr edx, BAND_SHIFT
     inc dword ptr [rsi + rdx*4]
+    inc eax
+    jmp count
+dead:
+    mov dword ptr [r10 + rax*4], -1
     inc eax
     jmp count
 counted:
@@ -117,11 +128,14 @@ bucket:
     cmp ecx, edx
     jae done
     mov eax, dword ptr [r10 + rcx*4]
+    cmp eax, -1
+    je skip                            ; dead
     shr eax, BAND_SHIFT
     mov r11d, dword ptr [rsi + rax*4]
     mov dword ptr [r9 + r11*4], ecx
     inc r11d
     mov dword ptr [rsi + rax*4], r11d
+skip:
     inc ecx
     jmp bucket
 done:
@@ -350,6 +364,7 @@ chunks_done:
     inc ebx
     cmp ebx, GRID_BANDS
     jb bands
+    mov grid_live, edx                 ; the survivors: the new population
     call grid_stamp
     mov rcx, rax
     sub rcx, qword ptr [rsp + 24]
@@ -372,6 +387,9 @@ chunks_done:
     mov rcx, rax
     sub rcx, qword ptr [rsp + 24]
     add grid_stage_cyc[16], rcx
+    mov eax, grid_live
+    mov sim_count, eax
+    mov sim_alive, eax
     ; the end of the last cell
     mov rax, sim_cell_arr
     mov edx, sim_count

@@ -19,7 +19,6 @@ import "simulation/separate_v2.rasm"
 import "simulation/separate_v3.rasm"
 import "simulation/separate_v4.rasm"
 import "simulation/combat.rasm"
-import "simulation/compact_lut.rasm"
 import "simulation/compact_mt.rasm"
 import "simulation/abilities.rasm"
 import "simulation/grid_mt.rasm"
@@ -146,7 +145,7 @@ finished:
     mov ebx, kills
     mov esi, proj_count
     invoke(print, "combat cycles/tick=%u kills=%u projectiles=%u\n", rax, rbx, rsi)
-    mov eax, sim_count
+    mov eax, sim_alive
     mov ebx, hero_alive
     invoke(print, "count=%u hero_alive=%u\n", rax, rbx)
     mov rbx, grid_stage_cyc[0]
@@ -211,7 +210,7 @@ update_title: proc() = {
     mov r12, rax                       ; kills replace the instance cycles in the title
     vcvttss2si eax, hero_hp
     mov rdi, rax                       ; hp replaces the sim time
-    mov eax, sim_count
+    mov eax, sim_alive
     mov qword ptr [rsp + 32], rax
     mov qword ptr [rsp + 40], rsi
     mov qword ptr [rsp + 48], rdi

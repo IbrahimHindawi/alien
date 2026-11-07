@@ -18,7 +18,8 @@
 #define SEP_MAX_NEIGH 16
 
 ; state --------------------------------------------------------------------
-sim_count: u32 = 0
+sim_count: u32 = 0                     ; entities in storage (the dead of this tick included)
+sim_alive: u32 = 0                     ; the spec's count: the living
 sim_tick: u32 = 0
 hero_x: f32 = 0.0
 hero_z: f32 = 0.0
@@ -287,6 +288,7 @@ sim_init: proc(count: u32, seed: u32) = {
     sub rsp, 48                        ; 8 + 24 + 48 = 80; xmm6 at [rsp + 32]
     movaps xmmword ptr [rsp + 32], xmm6
     mov sim_count, ecx
+    mov sim_alive, ecx
     mov target_count, ecx
     mov sim_tick, 0
     mov hero_x, 0
@@ -918,11 +920,17 @@ sim_index_gather: proc() -> b32 = {
     mov rsi, sim_seq
     mov rdi, sim_order_map
     xor ecx, ecx
+    mov r10, sim_hp
+    vxorps xmm1, xmm1, xmm1
 map:
     cmp ecx, sim_count
     jae mapped
+    vmovss xmm0, dword ptr [r10 + rcx*4]
+    vcomiss xmm0, xmm1
+    jbe unmapped                       ; dead this tick: not in the spec's state
     mov eax, dword ptr [rsi + rcx*4]
     mov dword ptr [rdi + rax*4], ecx
+unmapped:
     inc ecx
     jmp map
 mapped:
@@ -978,9 +986,9 @@ sim_hash: proc() -> u64 = {
     sub rsp, 40
     call sim_index_gather
     mov rbx, 0xcbf29ce484222325
-    mov esi, sim_count
+    mov esi, sim_alive
     shl rsi, 2                         ; bytes per column
-    invoke(fnv1a, sim_count&, 4, rbx)
+    invoke(fnv1a, sim_alive&, 4, rbx)
     invoke(fnv1a, sim_tick&, 4, rax)
     invoke(fnv1a, hero_x&, 4, rax)
     invoke(fnv1a, hero_z&, 4, rax)
