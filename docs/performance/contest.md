@@ -93,3 +93,19 @@ of that was worth single-digit percent per step today. Matching that shape is
 a rewrite of the simulation's scheduling, not a port of one more kernel; after
 it, the honest expectation for assembly is parity to a 10-30% edge on the
 compute-bound parts (dense separation), not a multiple.
+
+## Round 2, interleaved (2026-11-07, late)
+
+`tools/duel.py`: the engines alternate per cell, medians of 5 (the machine's
+load drifted during the day, so separate runs were no longer comparable).
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1046 | 1037 | 0.99 |
+| 100k, 16 threads | 106 | 112 | **1.06** |
+| 1M, 1 thread | 9510 | 9308 | 0.98 |
+| 1M, 16 threads | 915 | 734 | 0.80 |
+| 1M dense, 1 thread | 26615 | 22956 | 0.86 |
+| 1M dense, 16 threads | 2581 | 1942 | 0.75 |
+
+The first cell won by the assembly engine, two level, three behind.

@@ -447,3 +447,21 @@ Kills and state are unchanged; only the order of death events (presentation)
 can differ. Interleaved A/B on a loaded machine (the rival itself measured
 874-977 us at 1M): 1M 16 threads 1324/1387/1366 -> 1196/1227/1294 us, 100k
 150/123 -> 131/113 us. **Kept.**
+
+## 2026-11-07: the first win, measured interleaved
+
+With the machine's load drifting, separate runs of the two engines stopped
+being comparable, so `tools/duel.py` runs them alternately per cell and takes
+medians (5 rounds each). Every hash checked.
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1046 | 1037 | 0.99 |
+| 100k, 16 threads | 106 | 112 | **1.06** |
+| 1M, 1 thread | 9510 | 9308 | 0.98 |
+| 1M, 16 threads | 915 | 734 | 0.80 |
+| 1M dense, 1 thread | 26615 | 22956 | 0.86 |
+| 1M dense, 16 threads | 2581 | 1942 | 0.75 |
+
+The assembly engine is faster than clang's in one cell, level in two, and
+behind in three: the dense crowd and 1M at 16 threads.
