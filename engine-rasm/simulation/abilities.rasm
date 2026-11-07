@@ -55,6 +55,14 @@ k_bomb_r2: const f32 = 144.0
 k_bomb_damage: const f32 = 4.0
 k_bomb_push: const f32 = 40.0
 
+; tunables (see combat.rasm): spec values, reset by sim_init
+g_dash_cd: u32 = DASH_CD
+g_pulse_cd: u32 = PULSE_CD
+g_bomb_cd: u32 = BOMB_CD
+g_pulse_push: f32 = 26.0
+g_energy_regen: f32 = 0.25
+g_beam_dpt: f32 = 0.2
+
 ; -> xmm0, xmm1: the aim direction normalised, or (0, 1) (spec: as in Fire)
 aim_direction: proc() = {
     vmovss xmm0, sim_aim_x
@@ -104,7 +112,8 @@ dash_start: proc() = {
     vmovss dash_x, xmm0
     vmovss dash_z, xmm1
     mov dash_ticks, DASH_TICKS
-    mov dash_cd, DASH_CD
+    mov eax, g_dash_cd
+    mov dash_cd, eax
 done:
     add rsp, 40
     ret
@@ -127,7 +136,8 @@ sim_abilities: proc() = {
         vmovss pulse_cx, xmm0
         vmovss xmm0, hero_z
         vmovss pulse_cz, xmm0
-        mov pulse_cd, PULSE_CD
+        mov eax, g_pulse_cd
+        mov pulse_cd, eax
     pulse_running:
     cmp pulse_on, 0
     je pulse_cool
@@ -137,7 +147,7 @@ sim_abilities: proc() = {
         vdivss xmm2, xmm0, k_pulse_max
         vmovss xmm3, k_one[0]
         vsubss xmm2, xmm3, xmm2
-        vmovss xmm3, k_pulse_push
+        vmovss xmm3, g_pulse_push
         vmulss xmm2, xmm3, xmm2                ; k = PUSH * (1 - r0 / MAX)
         vmovss fx_k, xmm2
         vmulss xmm2, xmm0, xmm0
@@ -171,7 +181,7 @@ sim_abilities: proc() = {
     no_beam:
         mov beam_on, 0
         vmovss xmm0, energy
-        vaddss xmm0, xmm0, k_energy_regen
+        vaddss xmm0, xmm0, g_energy_regen
         vminss xmm0, xmm0, k_energy_max
         vmovss energy, xmm0
     beam_done:
@@ -190,7 +200,8 @@ sim_abilities: proc() = {
         vmovss bomb_x, xmm0
         vmovss xmm0, sim_aim_z
         vmovss bomb_z, xmm0
-        mov bomb_cd, BOMB_CD
+        mov eax, g_bomb_cd
+        mov bomb_cd, eax
         jmp bomb_cool
     bomb_tick:
     cmp bomb_timer, 0
@@ -302,7 +313,7 @@ block:
         vbroadcastss ymm6, k_beam_w2
         vcmpps ymm10, ymm5, ymm6, 17               ; perp2 < W2
         vandps ymm9, ymm9, ymm10
-        vbroadcastss ymm6, k_beam_dpt
+        vbroadcastss ymm6, g_beam_dpt
         vsubps ymm6, ymm4, ymm6
         vblendvps ymm4, ymm4, ymm6, ymm9
     no_beam:

@@ -60,6 +60,7 @@ k_dt: [8]const f32[align(32)] = { 0.016666668, 0.016666668, 0.016666668, 0.01666
 k_lo: [8]const f32[align(32)] = { -1023.5, -1023.5, -1023.5, -1023.5, -1023.5, -1023.5, -1023.5, -1023.5 }
 k_hi: [8]const f32[align(32)] = { 1023.5, 1023.5, 1023.5, 1023.5, 1023.5, 1023.5, 1023.5, 1023.5 }
 k_hero_speed: const f32 = 9.0
+g_hero_speed: f32 = 9.0                ; tunable (see combat.rasm)
 k_diag: const f32 = 0.70710677
 k_unit: const f32 = 5.9604645e-08
 k_two: const f32 = 2.0
@@ -213,6 +214,19 @@ sim_init: proc(count: u32, seed: u32) = {
     mov beam_on, 0
     mov bomb_cd, 0
     mov bomb_timer, 0
+    ; tunables back to the spec's values
+    mov g_fire_interval, FIRE_INTERVAL
+    mov g_pierce, PROJ_PIERCE
+    mov g_multishot, 0
+    mov g_damage, 0x3F800000           ; 1.0
+    mov g_spawn_hp, 0x3F800000         ; 1.0
+    mov g_hero_speed, 0x41100000       ; 9.0
+    mov g_dash_cd, DASH_CD
+    mov g_pulse_cd, PULSE_CD
+    mov g_bomb_cd, BOMB_CD
+    mov g_pulse_push, 0x41D00000       ; 26.0
+    mov g_energy_regen, 0x3E800000     ; 0.25
+    mov g_beam_dpt, 0x3E4CCCCD         ; 0.2
     mov ebx, ecx
     mov ecx, edx
     call pcg32_seed
@@ -304,8 +318,8 @@ sim_hero: proc() = {
     walk:
     vmovss xmm0, sim_move_x
     vmovss xmm1, sim_move_z
-    vmulss xmm0, xmm0, k_hero_speed
-    vmulss xmm1, xmm1, k_hero_speed
+    vmulss xmm0, xmm0, g_hero_speed
+    vmulss xmm1, xmm1, g_hero_speed
     moving:
     vmulss xmm0, xmm0, k_dt[0]
     vaddss xmm0, xmm0, hero_x

@@ -34,6 +34,16 @@ proj_life: [PROJ_MAX]u32[align(32)] = {}
 proj_pierce: [PROJ_MAX]u32[align(32)] = {}
 
 k_enemy_hp: const f32 = 1.0
+
+; Tunables: the spec's constants, reset by sim_init. Only the game layer
+; (gameplay/progress.rasm, never active in --bench-sim or --test) changes them,
+; so the bench and the reference hashes see exactly SIM 5.
+g_fire_interval: u32 = FIRE_INTERVAL
+g_pierce: u32 = PROJ_PIERCE
+g_multishot: u32 = 0                   ; extra pairs of bolts per volley, fanned
+g_damage: f32 = 1.0
+g_spawn_hp: f32 = 1.0
+k_fan_cs: [8]const f32 = { 0.9902681, 0.1391731, 0.9612617, 0.2756374, 0.9135455, 0.4067366, 0.8480481, 0.5299193 }  ; cos, sin of 8, 16, 24, 32 degrees
 k_hero_hp: const f32 = 100.0
 k_fire_eps: const f32 = 1.0e-4
 k_spread_c: const f32 = 0.99862953
@@ -107,6 +117,49 @@ sim_fire: proc() = {
         vsubss xmm1, xmm3, xmm4        ; dz*C - dx*S
         vmovss xmm0, xmm0, xmm2
     spread_done:
+    call fire_append
+    inc shots
+    mov eax, g_fire_interval
+    mov fire_cooldown, eax
+    ; the fan (game upgrades only): pairs at +-8, 16, 24, 32 degrees around the shot
+    mov r10d, g_multishot
+    test r10d, r10d
+    jz cool
+    vmovss xmm4, xmm0, xmm0
+    vmovss xmm5, xmm1, xmm1
+    lea r11, k_fan_cs
+fan:
+    vmulss xmm0, xmm4, dword ptr [r11]
+    vmulss xmm2, xmm5, dword ptr [r11 + 4]
+    vsubss xmm0, xmm0, xmm2
+    vmulss xmm1, xmm4, dword ptr [r11 + 4]
+    vmulss xmm2, xmm5, dword ptr [r11]
+    vaddss xmm1, xmm1, xmm2
+    call fire_append
+    vmulss xmm0, xmm4, dword ptr [r11]
+    vmulss xmm2, xmm5, dword ptr [r11 + 4]
+    vaddss xmm0, xmm0, xmm2
+    vmulss xmm1, xmm5, dword ptr [r11]
+    vmulss xmm2, xmm4, dword ptr [r11 + 4]
+    vsubss xmm1, xmm1, xmm2
+    call fire_append
+    add r11, 8
+    dec r10d
+    jnz fan
+cool:
+    cmp fire_cooldown, 0
+    je done
+    dec fire_cooldown
+done:
+    ret
+}
+
+; xmm0, xmm1: a unit direction -> one projectile appended (when there is room).
+; Clobbers rax, rcx, xmm2.
+fire_append: proc() = {
+    mov ecx, proj_count
+    cmp ecx, PROJ_MAX
+    jae full
     lea rax, proj_x
     vmulss xmm2, xmm0, k_muzzle
     vaddss xmm2, xmm2, hero_x
@@ -124,15 +177,10 @@ sim_fire: proc() = {
     lea rax, proj_life
     mov dword ptr [rax + rcx*4], PROJ_LIFE
     lea rax, proj_pierce
-    mov dword ptr [rax + rcx*4], PROJ_PIERCE
+    mov edx, g_pierce
+    mov dword ptr [rax + rcx*4], edx
     inc proj_count
-    inc shots
-    mov fire_cooldown, FIRE_INTERVAL
-cool:
-    cmp fire_cooldown, 0
-    je done
-    dec fire_cooldown
-done:
+full:
     ret
 }
 
@@ -225,7 +273,7 @@ candidate:
     vaddss xmm2, xmm2, xmm3
     vcomiss xmm2, k_proj_r2
     jae skip
-    vsubss xmm4, xmm4, k_one[0]                    ; hp - damage
+    vsubss xmm4, xmm4, g_damage                    ; hp - damage
     vmovss dword ptr [rsi + rdi*4], xmm4
     lea rax, proj_pierce
     dec dword ptr [rax + rbx*4]
@@ -525,7 +573,8 @@ retry:
     mov rax, sim_vel_z
     mov dword ptr [rax + rcx*4], 0
     mov rax, sim_hp
-    mov dword ptr [rax + rcx*4], 0x3F800000
+    mov edx, g_spawn_hp
+    mov dword ptr [rax + rcx*4], edx
     inc sim_count
     inc spawned
     dec ebx
