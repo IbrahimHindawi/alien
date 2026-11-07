@@ -27,7 +27,7 @@ reports with a stack scan (`python tools/symbolize.py <rva>`),
 | 4 playable hero | done: WASD, mouse aim, automatic piercing weapon, damage, death, restart, escalating runs, top-down and third-person cameras (V), HUD. Camera obstruction waits for obstacles |
 | 5 cybernetic aliens | assets done (Tripo, reviewed, 3 LODs, halved budgets, 6 in-place baked clips); only scuttlers are simulated; baked clips not yet played (VAT) |
 | 6 combat spectacle | done: dash, gravity pulse, beam, orbital strike, death shards, camera shake, hit flash; progression: XP gems, levels, a pick of three from twelve upgrades, aliens toughen every 90 s, the swarm snowballs (quadratic). Balance needs real play |
-| 7 optimisation | in progress: 1M tick on 16 threads 14.5 -> 3.6 ms (binned grid, parallel AVX2 compaction; docs/performance/log.md). Contest round 1 lost to clang-compiled C by 1.4-4.9x: the C engine's design is better (docs/performance/contest.md); round 2 ports its ideas |
+| 7 optimisation | in progress: 1M tick on 16 threads 14.5 -> ~1.0 ms, one thread 31.6 -> 8.9 ms. Against clang-compiled C (docs/performance/contest.md): faster in 4 of 6 cells (every single-thread one, 100k at 16 threads), behind at 1M on 16 threads (0.73) and dense on 16 threads (0.84) |
 | 8 polish | started: HDR, bloom, ACES, sky, basalt ground with glowing veins (the ground was never drawn before: culled), blob shadows, hero lamp and ring, pulse and strike on the ground, HUD with XP bar, level, timer and GPU time. Missing: audio, menus, settings, saves |
 
 Controls: WASD move, mouse aim (fire is automatic), Space dash, right mouse

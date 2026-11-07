@@ -109,3 +109,21 @@ load drifted during the day, so separate runs were no longer comparable).
 | 1M dense, 16 threads | 2581 | 1942 | 0.75 |
 
 The first cell won by the assembly engine, two level, three behind.
+
+## Round 2, latest (2026-11-07, night)
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1025 | 1048 | **1.02** |
+| 100k, 16 threads | 104 | 113 | **1.09** |
+| 1M, 1 thread | 8942 | 9284 | **1.04** |
+| 1M, 16 threads | 1052 | 764 | 0.73 |
+| 1M dense, 1 thread | 22289 | 23085 | **1.04** |
+| 1M dense, 16 threads | 2368 | 1986 | 0.84 |
+
+The assembly engine is faster in four of six cells: every single-threaded
+one, and 100k at 16 threads. The two left are the large populations at 16
+threads, where the C engine's per-thread row buffers keep a band's data in
+L2 while this engine's build streams six columns through L3: its band job
+waits on memory there (uProf: the merge's packing and the movers' copies).
+Closing them is the row-buffer design, a rewrite of the build, not a kernel.

@@ -489,3 +489,19 @@ Duel, interleaved, loaded machine: 100k 1T 1.03, 100k 16T 1.35 (asm ahead);
 
 Duel, interleaved: 100k 1T 0.97, 100k 16T **1.19**, 1M 1T 0.96, 1M 16T 0.76,
 dense 1T **1.00**, dense 16T 0.84.
+
+## 2026-11-07: one pass over the window (kept, large); full packing stores (discarded)
+
+- The windowed band build scanned its window twice (a scalar collect of the
+  movers, then a vector leaver pass over the old range). One vectorised pass
+  now does both: new cell in the band and not the old one -> listed; old cell
+  in the band and not the new one -> out of its old cell's count (the old
+  sizes are computed first). 1M one thread 9.69 -> 8.87 ms; 16 threads ~990
+  -> ~900 us.
+- Full stores instead of `vpmaskmovd` in the merge's packing, masked only near
+  the band's end: within noise at 16 threads (the packing waits on memory, not
+  on the stores). Discarded.
+
+Duel, interleaved, 5 rounds (C / asm, above 1 the assembly is faster):
+100k 1T **1.02**, 100k 16T **1.09**, 1M 1T **1.04**, 1M 16T 0.73,
+dense 1T **1.04**, dense 16T 0.84.
