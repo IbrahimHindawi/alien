@@ -308,3 +308,17 @@ and bucket passes.
 | 1M dense | 4451 | 3546..3717 |
 
 **Kept.**
+
+## 2026-11-07: separation fast path (kept) and 16 lanes (discarded)
+
+- **Fast path (kept)**: the candidate loop drops the self test (a lane meets
+  itself once: +0.0f and one hit, subtracted), the cap compare and the lane
+  mask; per group, if a lane has more than 16 real hits the group is redone
+  with the exact capped loop, and a capped group makes the next start exact.
+  One thread: dense 1M 38.0 -> 22.4 ms over 50 ticks (33.1 over 300), sparse
+  1M 15.3 -> 12.1..13.5 ms; 16 threads 1M 1896 -> 1768, dense 3732 -> 3024.
+- **16 lanes (discarded)**: two 8-lane vectors per broadcast candidate, two
+  independent add chains, `sx - dx*(d2 - 1)` with one masked factor. Slower
+  everywhere (1T dense 33.1 -> 35.3 ms, 100k 1366 -> 1629 us, 16T 1M 1768 ->
+  1844): the spills and two tails per group cost more than the shared
+  broadcasts saved, and in crowds one capped lane sends all 16 to the exact path.
