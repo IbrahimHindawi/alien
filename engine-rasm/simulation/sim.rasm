@@ -301,6 +301,7 @@ sim_init: proc(count: u32, seed: u32) = {
     movaps xmmword ptr [rsp + 32], xmm6
     mov sim_count, ecx
     mov sim_alive, ecx
+    mov grid_built_n, 0                ; nothing is in grid order yet
     mov target_count, ecx
     mov sim_tick, 0
     mov hero_x, 0

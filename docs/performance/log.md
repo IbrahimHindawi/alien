@@ -276,3 +276,15 @@ bucket, band build, edges, deaths, area effects), each reading its inputs
 from L3/DRAM; the rival builds each band's rows from the previous tick's
 neighbouring rows inside one work-stealing pass and never has the global bin
 and bucket passes.
+
+## 2026-11-07: the windowed sweep (kept, small)
+
+- **Change**: the fused integration records the tick's largest move on one
+  axis (atomic max); the next build bounds row changes by it and, when few
+  spawns are pending, each band counts its new members from its own old rows
+  widened by that bound plus the spawns, with no global bin or bucket pass
+  and one barrier fewer. The band job collects its movers from the same
+  window. The first tick and large moves fall back to the full build.
+- **Measured** (16 threads): 1M sparse 2390 -> 2301 us, 100k 375 -> 360; the
+  window scan costs about what bin and bucket did. **Kept** (one barrier
+  fewer per tick, the structure the remaining work builds on).
