@@ -16,7 +16,7 @@ EXE = ROOT / 'build' / 'md_rasm.exe'
 sys.path.insert(0, str(ROOT / 'tools'))
 import sim_reference  # noqa: E402
 
-SELF_TESTS = 6
+SELF_TESTS = 7
 SCENARIOS = [  # (entities, ticks, seed, spawn_half): sparse, dense, very dense with long hero walk
     (1000, 120, 1, 1000),
     (3000, 300, 5, 20),

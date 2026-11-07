@@ -709,7 +709,7 @@ sim_step: proc(keys: u32) = {
     sub rcx, rbx
     mov cyc_grid, rcx
     mov rbx, rax
-    mov rcx, sim_separate_v2&
+    mov rcx, sim_separate_v3&
     mov edx, sim_count
     mov r8d, 2048
     call pool_dispatch

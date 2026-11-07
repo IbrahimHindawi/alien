@@ -59,3 +59,14 @@ grid from scratch every tick.
 Round 2, as agreed before the contest, is to steal: the ideas above are not
 specific to C, and porting them is the honest way to find out what assembly
 adds on top of the same design.
+
+## Round 2, in progress
+
+| step | 100k 1T | 100k 16T | 1M 1T | 1M 16T | dense 1T | dense 16T |
+|---|---:|---:|---:|---:|---:|---:|
+| round 1 (asm) | 1434 | 502 | 15328 | 3572 | 84999 | 7186 |
+| lanes = entities separation | 1139 | 491 | 16410 | 3554 | 40349 | 4151 |
+| C rival | 1012 | 110 | 9268 | 733 | 22535 | 1920 |
+
+Next from the list: the grid kept in order between ticks and the fused band
+pass (ideas 1 to 3), which is where the 16-thread gap is.

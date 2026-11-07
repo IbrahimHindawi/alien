@@ -142,3 +142,23 @@ Grid at 1M, 16 threads: 12.3 -> 5.2 cycles/entity. **Kept.**
 
 Single-threaded the full copy costs the same as the old partial scalar copy
 (4.46M). **Kept.**
+
+## 2026-11-07: separation with lanes = entities (kept; contest round 2, idea 1)
+
+- **Idea** (from the C rival, docs/performance/contest.md): lanes are up to 8
+  consecutive sorted slots of one row; every candidate of the row window is
+  broadcast to all lanes. Outside a lane's 3x3 cells a candidate is >= 2 m
+  away, so it never hits; the window is read in spec order; lanes that miss
+  add +0.0f (exact: the sums never become -0.0f); a per-lane counter keeps
+  the 16 cap. No branch on a distance test.
+- **Correctness**: new self test `separation v3 (lanes) equals scalar,
+  crowded`; every reference hash; the contest's recorded hashes.
+
+| scenario | separate c/e before | after | us/tick before | after |
+|---|---:|---:|---:|---:|
+| 100k sparse, 1 thread | 36.2 | 25.9 | 1434 | 1139 |
+| 1M dense, 1 thread | 292 | 133 | 84999 | 40349 |
+| 1M dense, 16 threads | 22.7 | 10.6 | 7186 | 4151 |
+
+**Kept.** The remaining gap at 16 threads is the layout: the rival keeps the
+entities in grid order and fuses grid, separation and integration per band.
