@@ -157,7 +157,9 @@ finished:
     invoke(print, "grid stages (kcycles, all ticks): bin=%u bucket=%u bands=%u\n", rbx, rsi, rax)
     mov rbx, grid_stage_cyc[24]
     shr rbx, 10
-    invoke(print, "separation (kcycles, all threads): %u\n", rbx)
+    mov rsi, grid_stage_cyc[32]
+    shr rsi, 10
+    invoke(print, "busy (kcycles, all threads): separation=%u band jobs=%u\n", rbx, rsi)
     mov eax, grid_windowed_ticks
     mov ebx, grid_count_error
     invoke(print, "windowed builds=%u count errors=%u\n", rax, rbx)

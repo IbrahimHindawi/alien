@@ -7,12 +7,13 @@ Each check prints one line; a check that cannot run counts as a failure, so a
 filtered or truncated log can never look like a pass.
 """
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = ROOT / 'build' / 'md_rasm.exe'
+EXE = Path(os.environ.get('MD_EXE', ROOT / 'build' / 'md_rasm.exe'))  # MD_EXE: test another build
 sys.path.insert(0, str(ROOT / 'tools'))
 import sim_reference  # noqa: E402
 

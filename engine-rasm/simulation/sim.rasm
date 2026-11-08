@@ -189,6 +189,11 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_pos3_z, rax
+    ; a fused band's output buffer per pool participant (64 of them)
+    invoke(arena_push, arena_perm&, 33554432)
+    test rax, rax
+    jz failed
+    mov fz_buf, rax
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed

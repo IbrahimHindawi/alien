@@ -218,7 +218,8 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     push r14
     push r15
     push rbp
-    sub rsp, 72                        ; [rsp] base, [+4] n, [+8] end, [+12] old lo, [+16] old hi, [+24] lo cell, [+40..] the merge's state
+    sub rsp, 72                        ; [rsp] base, [+4] n, [+8] end, [+12] old lo, [+16] old hi, [+24] lo cell, [+40..] the merge's state, [+64] participant
+    mov dword ptr [rsp + 64], r9d
     mov ebx, r8d
     mov r9d, ebx
     shl r9d, BAND_SHIFT                ; lo cell
@@ -972,39 +973,86 @@ gather_one:
     jmp gather_one
 gathered_b:
     vzeroupper
-    ; fused: the band's interior rows (lo + 1 .. lo + 6) need only the band's
+    ; Fused: the band's interior rows (lo + 1 .. lo + 6) need only the band's
     ; own rows, which this thread has just written: separate and integrate
-    ; them now, while they are in its cache
+    ; them now, while they are in its cache. The integrated positions go to
+    ; this participant's buffer (it stays in cache too) and each row is
+    ; copied home over its start positions as soon as no row next to it is
+    ; left to separate: rows lo + 2 .. lo + 5 now; rows lo + 1 and lo + 6 wait
+    ; in the pending columns for the boundary jobs below and above.
     cmp grid_fuse_now, 0
     je not_fused
+    mov eax, dword ptr [rsp + 24]
+    shr eax, BAND_SHIFT
+    mov dword ptr [rsp + 32], eax      ; band
+    mov ecx, dword ptr [rsp]
+    mov edx, dword ptr [rsp + 64]
+    call fz_out_local                  ; the band's slots into the buffer
     mov eax, dword ptr [rsp + 24]      ; lo cell
-    mov rsi, sim_cell_arr
-    mov ecx, dword ptr [rsi + rax*4 + 4 + GRID_DIM * 4]         ; start of row lo + 1
-    mov edx, dword ptr [rsi + rax*4 + 4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + rax*4 + GRID_DIM * 4]         ; start of row lo + 1
+    mov edx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
+    mov r9d, dword ptr [rsp + 64]
     call sim_separate_v4
+    cmp dword ptr [rsp + 32], 0
+    jne not_first
+        ; band 0: row 0 has no row below; rows 0 .. 5 are final
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi]
+        mov edx, dword ptr [rsi + GRID_DIM * 4]
+        mov r9d, dword ptr [rsp + 64]
+        call sim_separate_v4
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi]
+        mov edx, dword ptr [rsi + 6 * GRID_DIM * 4]
+        mov r8d, dword ptr [rsp + 64]
+        call fz_rows_home
+        jmp first_done
+    not_first:
+        mov eax, dword ptr [rsp + 24]
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi + rax*4 + GRID_DIM * 4]
+        mov edx, dword ptr [rsi + rax*4 + 2 * GRID_DIM * 4]
+        mov r8d, dword ptr [rsp + 64]
+        call fz_rows_stash             ; row lo + 1
+        mov eax, dword ptr [rsp + 24]
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi + rax*4 + 2 * GRID_DIM * 4]
+        mov edx, dword ptr [rsi + rax*4 + 6 * GRID_DIM * 4]
+        mov r8d, dword ptr [rsp + 64]
+        call fz_rows_home              ; rows lo + 2 .. lo + 5
+    first_done:
+    cmp dword ptr [rsp + 32], GRID_BANDS - 1
+    jne not_last
+        ; the last band: row 1023 has no row above; rows lo + 6, lo + 7 are final
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi + (GRID_CELLS - GRID_DIM) * 4]
+        mov edx, dword ptr [rsp + 8]
+        mov r9d, dword ptr [rsp + 64]
+        call sim_separate_v4
+        mov eax, dword ptr [rsp + 24]
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi + rax*4 + 6 * GRID_DIM * 4]
+        mov edx, dword ptr [rsp + 8]
+        mov r8d, dword ptr [rsp + 64]
+        call fz_rows_home
+        jmp last_done
+    not_last:
+        mov eax, dword ptr [rsp + 24]
+        mov rsi, sim_cell_start
+        mov ecx, dword ptr [rsi + rax*4 + 6 * GRID_DIM * 4]
+        mov edx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]
+        mov r8d, dword ptr [rsp + 64]
+        call fz_rows_stash             ; row lo + 6
+    last_done:
     ; Boundary rows. The two rows either side of a boundary between bands
     ; need only those two bands. Each band, when finished, publishes its
     ; stamp with a locked exchange (a full fence), then claims (lock cmpxchg)
     ; each boundary whose other band is finished too and separates its rows:
     ; of two neighbours, the later one always sees the earlier one done, and
     ; only one claim succeeds. No pass over the edges, no barrier for them.
-    mov eax, dword ptr [rsp + 24]
-    shr eax, BAND_SHIFT
-    mov dword ptr [rsp + 32], eax      ; band
-    mov rsi, sim_cell_start
-    test eax, eax
-    jnz not_first
-        mov ecx, dword ptr [rsi]                       ; band 0: row 0 has no row below
-        mov edx, dword ptr [rsi + GRID_DIM * 4]
-        call sim_separate_v4
-    not_first:
-    cmp dword ptr [rsp + 32], GRID_BANDS - 1
-    jne not_last
-        mov rsi, sim_cell_start                        ; the last band: row 1023 has no row above
-        mov ecx, dword ptr [rsi + (GRID_CELLS - GRID_DIM) * 4]
-        mov edx, dword ptr [rsp + 8]
-        call sim_separate_v4
-    not_last:
+    ; After a boundary's two rows, they and the pending row on each side are
+    ; final.
     mov eax, grid_build_id
     mov ecx, dword ptr [rsp + 32]
     lea rdx, band_done
@@ -1023,11 +1071,9 @@ gathered_b:
     mov r8d, dword ptr [rsp + 32]
     lock cmpxchg dword ptr [rdx + r8*4], ecx
     jnz below_done
-    mov rsi, sim_cell_start
     mov eax, dword ptr [rsp + 24]
-    mov ecx, dword ptr [rsi + rax*4 - GRID_DIM * 4]  ; start of row lo - 1
-    mov edx, dword ptr [rsi + rax*4 + GRID_DIM * 4]  ; start of row lo + 1
-    call sim_separate_v4
+    sub eax, GRID_DIM
+    call grid_boundary                 ; rows lo - 1, lo
 below_done:
     ; the boundary above: rows lo + 7 and lo + 8
     mov eax, dword ptr [rsp + 32]
@@ -1043,11 +1089,9 @@ below_done:
     mov r8d, dword ptr [rsp + 32]
     lock cmpxchg dword ptr [rdx + r8*4 + 4], ecx
     jnz above_done
-    mov rsi, sim_cell_start
     mov eax, dword ptr [rsp + 24]
-    mov ecx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]  ; start of row lo + 7
-    mov edx, dword ptr [rsi + rax*4 + 9 * GRID_DIM * 4]  ; start of row lo + 9
-    call sim_separate_v4
+    add eax, 7 * GRID_DIM
+    call grid_boundary                 ; rows lo + 7, lo + 8
 above_done:
 not_fused:
     add rsp, 72
@@ -1107,30 +1151,40 @@ done:
     ret
 }
 
-; r8d: band. The band's first and last rows, after every band is built.
-grid_edge_job: proc(begin: u32, end: u32, band: u32) = {
+; Inside grid_band_job (its participant at the caller's [rsp + 64]). eax: the
+; first cell of row r, the lower of a boundary's two rows r and r + 1 (both
+; bands built). Separate both into the participant's buffer, then copy home
+; rows r and r + 1 and the pending rows r - 1 and r + 2: every row next to
+; them is separated now.
+grid_boundary: proc() = {
     push rbx
     push rsi
     push rdi
     sub rsp, 32                        ; 8 + 24 + 32 = 64
-    mov edi, r8d                       ; band
-    mov ebx, r8d
-    shl ebx, BAND_SHIFT                ; lo cell
+    mov ebx, eax
+    mov edi, dword ptr [rsp + 128]     ; the participant (the caller's [rsp + 64])
     mov rsi, sim_cell_start
-    lea rax, edge_claim
-    cmp dword ptr [rax + rdi*4], 0
-    jne bottom_done                    ; done by this band's job
     mov ecx, dword ptr [rsi + rbx*4]
-    mov edx, dword ptr [rsi + rbx*4 + GRID_DIM * 4]
+    mov edx, edi
+    call fz_out_local
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + rbx*4]
+    mov edx, dword ptr [rsi + rbx*4 + 2 * GRID_DIM * 4]
+    mov r9d, edi
     call sim_separate_v4
-bottom_done:
-    lea rax, edge_claim
-    cmp dword ptr [rax + rdi*4 + 4], 0
-    jne top_done                       ; done by the next band's job
-    mov ecx, dword ptr [rsi + rbx*4 + 7 * GRID_DIM * 4]
-    mov edx, dword ptr [rsi + rbx*4 + BAND_CELLS * 4]
-    call sim_separate_v4
-top_done:
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + rbx*4]
+    mov edx, dword ptr [rsi + rbx*4 + 2 * GRID_DIM * 4]
+    mov r8d, edi
+    call fz_rows_home
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + rbx*4 - GRID_DIM * 4]
+    mov edx, dword ptr [rsi + rbx*4]
+    call fz_rows_pend
+    mov rsi, sim_cell_start
+    mov ecx, dword ptr [rsi + rbx*4 + 2 * GRID_DIM * 4]
+    mov edx, dword ptr [rsi + rbx*4 + 3 * GRID_DIM * 4]
+    call fz_rows_pend
     add rsp, 32
     pop rdi
     pop rsi
@@ -1139,7 +1193,28 @@ top_done:
 }
 
 ; The whole grid build on the pool.
-grid_stage_cyc: [4]u64 = {}
+grid_stage_cyc: [5]u64 = {}
+
+; grid_band_job, its busy cycles summed over threads into grid_stage_cyc[32]
+grid_band_job_timed: proc(begin: u32, end: u32, band: u32) = {
+    push rbx
+    sub rsp, 32
+    mov r10, rdx
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    mov rbx, rax
+    mov rdx, r10
+    call grid_band_job
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    sub rax, rbx
+    lock add grid_stage_cyc[32], rax
+    add rsp, 32
+    pop rbx
+    ret
+}
 
 ; rdtsc into rax
 grid_stamp: proc() = {
@@ -1167,10 +1242,21 @@ sim_grid_mt: proc() = {
     mov fz_vel_x, rax
     mov rax, sim_vel_z2
     mov fz_vel_z, rax
+    ; integrated positions: into sim_pos3 (every participant; a fused band's
+    ; job points its own entry at its buffer), which also holds the rows
+    ; waiting for a boundary job
     mov rax, sim_pos3_x
-    mov fz_out_x, rax
-    mov rax, sim_pos3_z
-    mov fz_out_z, rax
+    mov rdx, sim_pos3_z
+    mov fz_pend_x, rax
+    mov fz_pend_z, rdx
+    lea rcx, fz_out_tab
+    xor r8d, r8d
+out_tab:
+    mov qword ptr [rcx + r8], rax
+    mov qword ptr [rcx + r8 + 8], rdx
+    add r8d, 16
+    cmp r8d, 64 * 16
+    jb out_tab
     mov rax, sim_cell2
     mov fz_cell, rax
     mov rax, sim_slot_cell2
@@ -1333,6 +1419,11 @@ mchunks_done:
     add grid_stage_cyc[8], rcx
     mov qword ptr [rsp + 24], rax
 bands_ready:
+    mov fz_inplace, 0
+    cmp grid_live, FZ_INPLACE_MIN
+    jb inplace_decided
+    mov fz_inplace, 1
+inplace_decided:
     inc grid_build_id
     xor eax, eax
     lea rdi, edge_claim
@@ -1346,7 +1437,7 @@ bands_ready:
     lea rdi, next_mov_total
     mov ecx, GRID_BANDS
     rep stosd
-    mov rcx, grid_band_job&
+    mov rcx, grid_band_job_timed&
     mov edx, GRID_BANDS
     mov r8d, 1
     call pool_dispatch
@@ -1396,15 +1487,18 @@ bands_ready:
     je unfused
     cmp grid_fuse_now, 0
     je by_slots
-    ; (every boundary was claimed by one of its two bands)
-    jmp separated
+    ; (every boundary was claimed by one of its two bands; in place, every
+    ; row's integrated positions are home in the live columns)
+    cmp fz_inplace, 0
+    jne cells_swap
+    jmp positions_swap
 by_slots:
     ; a dense crowd: separation over chunks of slots, on every thread
     mov rcx, sim_separate_v4&
     mov edx, sim_count
     mov r8d, 2048
     call pool_dispatch
-separated:
+positions_swap:
     ; the integrated positions become the live ones
     mov rax, sim_pos_x
     mov rcx, sim_pos3_x
@@ -1414,7 +1508,8 @@ separated:
     mov rcx, sim_pos3_z
     mov sim_pos_z, rcx
     mov sim_pos3_z, rax
-    ; and its cells are the next build's
+cells_swap:
+    ; the integration's cells are the next build's
     mov rax, sim_cell
     mov rcx, sim_cell2
     mov sim_cell, rcx

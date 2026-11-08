@@ -3,7 +3,7 @@
 ; One job at a time: pool_dispatch(job, total, chunk) splits [0, total) into
 ; chunks of `chunk` items; the main thread and every worker take chunks from
 ; an atomic counter until none are left, calling job(begin, end, chunk_index)
-; for each. A job writes only its own items' outputs, so the result never
+; for each (and the participant's index in r9d, for per-thread scratch). A job writes only its own items' outputs, so the result never
 ; depends on which thread ran which chunk: threaded runs are bit-identical to
 ; single-threaded ones (tools/test.py checks this).
 ;
@@ -136,6 +136,7 @@ take:
     cmp eax, pool_total
     cmova eax, pool_total
     mov edx, eax                       ; end
+    mov r9d, esi                       ; the participant (0 .. pool_parts - 1)
     mov rbx, pool_job
     call rbx
     jmp take
