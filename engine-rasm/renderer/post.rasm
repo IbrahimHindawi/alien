@@ -118,14 +118,15 @@ one:
     vcall(device, ID3D11DeviceVtbl.CreateTexture2D, bloom_desc&, 0, rax)
     lea rax, bloom_tex
     mov rdx, [rax + rbx*8]
-    lea r8, bloom_rtv
-    lea r8, [r8 + rbx*8]
-    vcall(device, ID3D11DeviceVtbl.CreateRenderTargetView, rdx, 0, r8)
+    ; (the out pointer in r9 itself: vcall sets r8 to 0 before it fills r9)
+    lea r9, bloom_rtv
+    lea r9, [r9 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateRenderTargetView, rdx, 0, r9)
     lea rax, bloom_tex
     mov rdx, [rax + rbx*8]
-    lea r8, bloom_srv
-    lea r8, [r8 + rbx*8]
-    vcall(device, ID3D11DeviceVtbl.CreateShaderResourceView, rdx, 0, r8)
+    lea r9, bloom_srv
+    lea r9, [r9 + rbx*8]
+    vcall(device, ID3D11DeviceVtbl.CreateShaderResourceView, rdx, 0, r9)
     inc ebx
     cmp ebx, 2
     jb one

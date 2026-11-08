@@ -993,7 +993,8 @@ walked:
     mov eax, 1
     jmp done
 too_many:
-    invoke(print, "index order: %u sequence numbers exceed the map\n", rcx)
+    mov rdx, rcx
+    invoke(print, "index order: %u sequence numbers exceed the map\n", rdx)
     xor eax, eax
 done:
     add rsp, 32

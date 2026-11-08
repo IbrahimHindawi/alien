@@ -633,8 +633,8 @@ next:
         mov opt_capture, rax
         jmp advance
     not_capture:
-    mov rcx, [rsi + rdi*8]
-    invoke(print, "unknown option: %s\n", rcx)
+    mov rdx, [rsi + rdi*8]
+    invoke(print, "unknown option: %s\n", rdx)
     jmp failure
 advance:
     inc edi
