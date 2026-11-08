@@ -505,3 +505,11 @@ dense 1T **1.00**, dense 16T 0.84.
 Duel, interleaved, 5 rounds (C / asm, above 1 the assembly is faster):
 100k 1T **1.02**, 100k 16T **1.09**, 1M 1T **1.04**, 1M 16T 0.73,
 dense 1T **1.04**, dense 16T 0.84.
+
+## 2026-11-08: bands of 4 rows (discarded)
+
+256 bands of 4 rows against 128 of 8, contest matrix, 3 runs, back to back,
+every hash OK (us/tick, 8 rows / 4 rows): 100k 1T 1024 / 1092, 100k 16T
+107 / 116, 1M 1T 8805 / 9164, 1M 16T 912 / 899, dense 1T 21458 / 21725,
+dense 16T 2303 / 2196. Four cells worse, two better (dense 16T by 5%), and
+the 100k 16T cell falls behind the C rival (110). **Reverted to 8 rows.**
