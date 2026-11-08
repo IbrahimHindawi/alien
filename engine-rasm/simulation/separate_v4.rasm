@@ -809,7 +809,7 @@ merged_all:
     shl rdx, 32
     or rax, rdx
     sub rax, qword ptr [rsp + 280]
-    lock add grid_stage_cyc[24], rax
+    lock add grid_stage_cyc[3], rax
     add rsp, 1432 + 8 * GRID_BANDS
     pop r15
     pop r14

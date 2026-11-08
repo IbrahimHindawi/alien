@@ -151,14 +151,14 @@ finished:
     invoke(print, "count=%u hero_alive=%u\n", rax, rbx)
     mov rbx, grid_stage_cyc[0]
     shr rbx, 10
-    mov rsi, grid_stage_cyc[8]
+    mov rsi, grid_stage_cyc[1]
     shr rsi, 10
-    mov rax, grid_stage_cyc[16]
+    mov rax, grid_stage_cyc[2]
     shr rax, 10
     invoke(print, "grid stages (kcycles, all ticks): bin=%u bucket=%u bands=%u\n", rbx, rsi, rax)
-    mov rbx, grid_stage_cyc[24]
+    mov rbx, grid_stage_cyc[3]
     shr rbx, 10
-    mov rsi, grid_stage_cyc[32]
+    mov rsi, grid_stage_cyc[4]
     shr rsi, 10
     invoke(print, "busy (kcycles, all threads): separation=%u band jobs=%u\n", rbx, rsi)
     mov eax, grid_windowed_ticks

@@ -1336,7 +1336,7 @@ grid_boundary: proc() = {
 ; The whole grid build on the pool.
 grid_stage_cyc: [5]u64 = {}
 
-; grid_band_job, its busy cycles summed over threads into grid_stage_cyc[32]
+; grid_band_job, its busy cycles summed over threads into grid_stage_cyc[4]
 grid_band_job_timed: proc(begin: u32, end: u32, band: u32) = {
     push rbx
     sub rsp, 32
@@ -1357,7 +1357,7 @@ timed_done:
     shl rdx, 32
     or rax, rdx
     sub rax, rbx
-    lock add grid_stage_cyc[32], rax
+    lock add grid_stage_cyc[4], rax
     add rsp, 32
     pop rbx
     ret
@@ -1573,7 +1573,7 @@ mchunks_done:
     call grid_stamp
     mov rcx, rax
     sub rcx, qword ptr [rsp + 24]
-    add grid_stage_cyc[8], rcx
+    add grid_stage_cyc[1], rcx
     mov qword ptr [rsp + 24], rax
 bands_ready:
     ; the local build (grid_local.rasm) for bandwidth-bound ticks: windowed
@@ -1684,7 +1684,7 @@ inplace_decided:
     call grid_stamp
     mov rcx, rax
     sub rcx, qword ptr [rsp + 24]
-    add grid_stage_cyc[16], rcx
+    add grid_stage_cyc[2], rcx
     mov eax, grid_live
     mov sim_count, eax
     mov sim_alive, eax
