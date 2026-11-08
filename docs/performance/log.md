@@ -620,3 +620,5 @@ dense 1T **1.08**, dense 16T 0.98.
 Contest matrix, interleaved, 7 rounds (C / asm):
 100k 1T **1.12**, 100k 16T **1.55**, 1M 1T 0.99, 1M 16T **1.33**,
 dense 1T **1.08**, dense 16T 1.00.
+- One thread: integrating into the participant's buffer and streaming each
+  call's positions out to sim_pos3 (no read for ownership): +2%. Discarded.
