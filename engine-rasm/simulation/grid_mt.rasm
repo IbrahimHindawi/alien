@@ -673,6 +673,39 @@ piece:
     and eax, dword ptr [rsp + 48]
     jz piece_movers
     xor dword ptr [rsp + 48], eax
+    cmp eax, 255
+    jne piece_pack
+    ; the whole block, in order: eight band members, plain copies (masked
+    ; 256-bit stores are microcoded on Zen, ~12 cycles each)
+    mov r11, sim_pos_x
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, sim_pos_x2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_pos_z
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, sim_pos_z2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_x
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, sim_vel_x2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_z
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, sim_vel_z2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_hp
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, sim_hp2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_seq
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, sim_seq2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_slot_cell2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm0
+    add ebx, 8
+    jmp merge_next
+piece_pack:
     ; left-pack them (pdep/pext permutation) and store the seven columns
     mov rcx, 0x0101010101010101
     pdep rcx, rax, rcx
@@ -683,6 +716,42 @@ piece:
     vpmovzxbd ymm3, xmm3
     popcnt ecx, eax
     mov dword ptr [rsp + 44], ecx
+    ; output is written in ascending slots, so lanes past the packed ones
+    ; land on slots this job writes next: plain stores, unless they would
+    ; reach past the band's end
+    mov edx, dword ptr [rsp + 8]
+    sub edx, ebx
+    cmp edx, 8
+    jb piece_masked
+    mov r11, sim_pos_x
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_pos_x2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_pos_z
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_pos_z2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_x
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_vel_x2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_z
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_vel_z2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_hp
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_hp2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_seq
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, sim_seq2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    vpermd ymm1, ymm3, ymm0
+    mov r11, sim_slot_cell2
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    jmp piece_stored
+piece_masked:
     shl ecx, 5
     lea rdx, k_lane_valid
     vmovdqa ymm4, ymmword ptr [rdx + rcx]
@@ -713,6 +782,7 @@ piece:
     vpermd ymm1, ymm3, ymm0
     mov r11, sim_slot_cell2
     vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
+piece_stored:
     add ebx, dword ptr [rsp + 44]
     cmp dword ptr [rsp + 48], 0
     je merge_next

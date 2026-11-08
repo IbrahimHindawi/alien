@@ -53,6 +53,10 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     mov r15, sim_cell_start
     mov ebx, edx                       ; end
     mov esi, ecx                       ; s: the group's first slot
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    mov qword ptr [rsp + 280], rax
     mov dword ptr [rsp + 232], 0       ; groups start fast
     vxorps xmm0, xmm0, xmm0
     vmovups ymmword ptr [rsp + 240], ymm0
@@ -583,6 +587,11 @@ merged_mover:
     movaps xmm13, xmmword ptr [rsp + 176]
     movaps xmm14, xmmword ptr [rsp + 192]
     movaps xmm15, xmmword ptr [rsp + 208]
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    sub rax, qword ptr [rsp + 280]
+    lock add grid_stage_cyc[24], rax
     add rsp, 1400
     pop r15
     pop r14
