@@ -29,8 +29,8 @@ fz_inplace: u32 = 0                    ; this build's fused bands integrate in p
 fz_pend_x: *f32 = 0                    ; integrated rows waiting for their boundary job (sim_pos3)
 fz_pend_z: *f32 = 0                       ; per participant 1 << FZ_PART_SHIFT bytes: x, then z (sim_alloc)
 fz_seq: *u32 = 0                       ; the slots' sequences: bit 31 set here when the cell changes
-next_band_total: [128]u32 = {}         ; the next build's members and movers per band
-next_mov_total: [128]u32 = {}
+next_band_total: [GRID_BANDS]u32 = {}         ; the next build's members and movers per band
+next_mov_total: [GRID_BANDS]u32 = {}
 grid_maxdisp: u32 = 0                  ; the largest |move| on one axis this tick (f32 bits, >= 0)
 k_sep_cap17: [8]const u32[align(32)] = { 17, 17, 17, 17, 17, 17, 17, 17 }
 k_cell_moved: [8]const u32[align(32)] = { 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000 }
@@ -128,6 +128,47 @@ done:
     ret
 }
 
+; Inside sim_separate_v4 (its frame 8 above this one's return address): edi a
+; band about to be counted, outside the counters in use. Clears the counters
+; between it and those in use, and takes them into use. A call touches a band
+; or two, so it never clears or publishes all GRID_BANDS of them.
+fz_touch: proc() = {
+    push rax
+    push rcx
+    mov ecx, dword ptr [rsp + 24 + 1332]
+    test ecx, ecx
+    jns some
+    mov dword ptr [rsp + 24 + 1328], edi
+    mov dword ptr [rsp + 24 + 1332], edi
+    mov dword ptr [rsp + rdi*4 + 24 + 1400], 0
+    mov dword ptr [rsp + rdi*4 + 24 + 1400 + 4 * GRID_BANDS], 0
+    jmp done
+some:
+    cmp edi, ecx
+    jle not_above
+up:
+    inc ecx
+    mov dword ptr [rsp + rcx*4 + 24 + 1400], 0
+    mov dword ptr [rsp + rcx*4 + 24 + 1400 + 4 * GRID_BANDS], 0
+    cmp ecx, edi
+    jl up
+    mov dword ptr [rsp + 24 + 1332], edi
+    jmp done
+not_above:
+    mov ecx, dword ptr [rsp + 24 + 1328]
+down:
+    dec ecx
+    mov dword ptr [rsp + rcx*4 + 24 + 1400], 0
+    mov dword ptr [rsp + rcx*4 + 24 + 1400 + 4 * GRID_BANDS], 0
+    cmp ecx, edi
+    jg down
+    mov dword ptr [rsp + 24 + 1328], edi
+done:
+    pop rcx
+    pop rax
+    ret
+}
+
 ; ecx: first sorted slot, edx: one past the last, r9d: the participant (a pool
 ; job; its fz_out_tab entry says where the integrated positions go)
 sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
@@ -139,7 +180,7 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     push r13
     push r14
     push r15
-    sub rsp, 1400                      ; 8 + 64 + 1336 = 1408; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes, [rsp + 240] largest move, [rsp + 288] band counts, [rsp + 800] mover counts, [rsp + 1312] output x, z
+    sub rsp, 1400 + 8 * GRID_BANDS     ; 8 + 64 + 1400 + 8 * GRID_BANDS; [rsp .. 63] lane scratch, xmm6..15 at [rsp + 64 ..], [rsp + 224] lanes, [rsp + 240] largest move, [rsp + 280] timer, [rsp + 1312] output x, z, [rsp + 1328] counters in use (first, last), [rsp + 1336] steering tx, tz, [rsp + 1400] band counts, [rsp + 1400 + 4 * GRID_BANDS] mover counts
     lea rax, fz_out_tab
     shl r9d, 4
     mov r10, qword ptr [rax + r9]
@@ -169,13 +210,10 @@ sim_separate_v4: proc(begin: u32, end: u32, chunk: u32) = {
     mov dword ptr [rsp + 232], 0       ; groups start fast
     vxorps xmm0, xmm0, xmm0
     vmovups ymmword ptr [rsp + 240], ymm0
-    lea rax, [rsp + 288]
-    mov edx, 32
-zero_counts:
-    vmovups ymmword ptr [rax], ymm0
-    add rax, 32
-    dec edx
-    jnz zero_counts
+    ; the band counters in use: [rsp + 1328] .. [rsp + 1332] (none yet;
+    ; fz_touch clears each one as it comes into use)
+    mov dword ptr [rsp + 1328], 0x7FFFFFFF
+    mov dword ptr [rsp + 1332], -1
     vbroadcastss ymm14, k_one[0]
     vmovdqa ymm15, ymmword ptr k_sep_cap
 group:
@@ -616,11 +654,18 @@ separated:
     jne cell_lanes                     ; the group spans bands: lane by lane
 cells_stored:
     vmovd edi, xmm11
+    cmp edi, dword ptr [rsp + 1328]
+    jl touch_group
+    cmp edi, dword ptr [rsp + 1332]
+    jle touched_group
+touch_group:
+    call fz_touch
+touched_group:
     popcnt eax, edx
-    add dword ptr [rsp + rdi*4 + 288], eax
+    add dword ptr [rsp + rdi*4 + 1400], eax
     andn eax, r11d, edx                ; valid lanes that changed cell
     popcnt eax, eax
-    add dword ptr [rsp + rdi*4 + 800], eax
+    add dword ptr [rsp + rdi*4 + 1400 + 4 * GRID_BANDS], eax
     jmp cells_counted
 cell_lanes:
     xor edx, edx
@@ -628,10 +673,17 @@ cell_lane:
     mov eax, dword ptr [rsp + rdx*4]
     mov edi, eax
     shr edi, BAND_SHIFT
-    inc dword ptr [rsp + rdi*4 + 288]
+    cmp edi, dword ptr [rsp + 1328]
+    jl touch_lane
+    cmp edi, dword ptr [rsp + 1332]
+    jle touched_lane
+touch_lane:
+    call fz_touch
+touched_lane:
+    inc dword ptr [rsp + rdi*4 + 1400]
     bt r11d, edx
     jc cell_stays
-    inc dword ptr [rsp + rdi*4 + 800]
+    inc dword ptr [rsp + rdi*4 + 1400 + 4 * GRID_BANDS]
 cell_stays:
     inc edx
     cmp edx, ecx
@@ -681,24 +733,27 @@ publish:
     lock cmpxchg grid_maxdisp, edx
     jnz publish
 published:
-    ; this call's counts into the next build's totals
-    xor ecx, ecx
+    ; this call's counts into the next build's totals (the bands it touched)
+    mov ecx, dword ptr [rsp + 1328]
+    cmp dword ptr [rsp + 1332], 0
+    jl merged_all
 merge:
-    mov eax, dword ptr [rsp + rcx*4 + 288]
+    mov eax, dword ptr [rsp + rcx*4 + 1400]
     test eax, eax
     jz merged_band
     lea rdx, next_band_total
     lock add dword ptr [rdx + rcx*4], eax
 merged_band:
-    mov eax, dword ptr [rsp + rcx*4 + 800]
+    mov eax, dword ptr [rsp + rcx*4 + 1400 + 4 * GRID_BANDS]
     test eax, eax
     jz merged_mover
     lea rdx, next_mov_total
     lock add dword ptr [rdx + rcx*4], eax
 merged_mover:
     inc ecx
-    cmp ecx, 128
-    jb merge
+    cmp ecx, dword ptr [rsp + 1332]
+    jle merge
+merged_all:
     vzeroupper
     movaps xmm6, xmmword ptr [rsp + 64]
     movaps xmm7, xmmword ptr [rsp + 80]
@@ -715,7 +770,7 @@ merged_mover:
     or rax, rdx
     sub rax, qword ptr [rsp + 280]
     lock add grid_stage_cyc[24], rax
-    add rsp, 1400
+    add rsp, 1400 + 8 * GRID_BANDS
     pop r15
     pop r14
     pop r13

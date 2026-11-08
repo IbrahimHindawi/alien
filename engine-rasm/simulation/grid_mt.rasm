@@ -34,21 +34,29 @@
 ; self test against sim_grid and every reference hash check it), and a tick's
 ; work is a sequential pass plus work in proportion to the movers.
 
-#define BAND_ROWS 8
-#define BAND_SHIFT 13
-#define BAND_CELLS 8192
-#define GRID_BANDS 128
+; the band shape (rows per band, and what follows from it)
+#define BAND_ROWS 4
+#define BAND_ROW_SHIFT 2
+#define BAND_SHIFT 12
+#define BAND_CELLS 4096
+#define GRID_BANDS 256
+#define GRID_BANDS_1 257
+#define GRID_BANDS_2 512
+; a bin histogram row is GRID_BANDS u32: 1 << BAND_TABLE_SHIFT bytes
+#define BAND_TABLE_SHIFT 10
+; BIN_CHUNKS * GRID_BANDS
+#define BIN_HIST_N 16384
 #define BIN_CHUNK 16384
 #define BIN_CHUNKS 64
 
 band_total: [GRID_BANDS]u32 = {}
 grid_live: u32 = 0
 band_offset: [GRID_BANDS]u32 = {}
-bin_hist: [8192]u32[align(64)] = {}    ; [chunk * GRID_BANDS + band]
-bin_off: [8192]u32[align(64)] = {}
+bin_hist: [BIN_HIST_N]u32[align(64)] = {}    ; [chunk * GRID_BANDS + band]
+bin_off: [BIN_HIST_N]u32[align(64)] = {}
 sim_band_ids: *u32 = 0                  ; the movers by band: (storage index, then slot; new cell) pairs
-mov_hist: [8192]u32[align(64)] = {}     ; movers: [chunk * GRID_BANDS + band]
-mov_off: [8192]u32[align(64)] = {}
+mov_hist: [BIN_HIST_N]u32[align(64)] = {}     ; movers: [chunk * GRID_BANDS + band]
+mov_off: [BIN_HIST_N]u32[align(64)] = {}
 mov_band_off: [GRID_BANDS]u32 = {}
 mov_band_total: [GRID_BANDS]u32 = {}
 grid_old_count: u32 = 0                 ; storage at the start of the build
@@ -59,7 +67,7 @@ grid_windowed: u32 = 0                  ; this build counts from row windows (no
 grid_count_error: u32 = 0
 grid_build_id: u32 = 0                  ; this build's stamp
 band_done: [GRID_BANDS]u32 = {}         ; the stamp of the build that last finished each band
-edge_claim: [129]u32 = {}               ; [b]: the rows at the boundary below band b are done
+edge_claim: [GRID_BANDS_1]u32 = {}               ; [b]: the rows at the boundary below band b are done
 #define MERGE_FEW 256
 #define MERGE_NONE 0x7FFFFFFFFFFFFFFF
 k_shift1: [8]const u32[align(32)] = { 0, 0, 1, 2, 3, 4, 5, 6 }
@@ -68,8 +76,8 @@ sim_mkey: *u64 = 0                      ; MAX_ENTITIES: the sorted movers' keys
 k_bcast3: [8]const u32[align(32)] = { 3, 3, 3, 3, 3, 3, 3, 3 }
 k_bcast7: [8]const u32[align(32)] = { 7, 7, 7, 7, 7, 7, 7, 7 }
 k_upper_half: [8]const u32[align(32)] = { 0, 0, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF }
-band_old_lo: [129]u32 = {}   ; per band: its first slot in the last build ([GRID_BANDS]: their end)
-band_win: [256]u32 = {}      ; per band: its window's slots in the last build (windowed)
+band_old_lo: [GRID_BANDS_1]u32 = {}   ; per band: its first slot in the last build ([GRID_BANDS]: their end)
+band_win: [GRID_BANDS_2]u32 = {}      ; per band: its window's slots in the last build (windowed)
 grid_built_n: u32 = 0                   ; slots sorted by the last build; spawns follow them
 grid_d_rows: u32 = 0                    ; rows any entity can have moved since the last build
 k_disp_rows: const f32 = 0.5            ; a cell is 2 m
@@ -91,7 +99,7 @@ grid_bin_job: proc(begin: u32, end: u32, chunk: u32) = {
     mov edi, edx                       ; end
     ; this chunk's histogram row, zeroed
     mov eax, r8d
-    shl eax, 9                         ; chunk * GRID_BANDS * 4
+    shl eax, BAND_TABLE_SHIFT          ; chunk * GRID_BANDS * 4
     lea rsi, bin_hist
     add rsi, rax
     lea r11, mov_hist
@@ -210,7 +218,7 @@ counted:
 grid_bucket_job: proc(begin: u32, end: u32, chunk: u32) = {
     push rsi
     mov eax, r8d
-    shl eax, 9
+    shl eax, BAND_TABLE_SHIFT
     lea rsi, mov_off
     add rsi, rax
     mov r10, sim_cell
@@ -1079,13 +1087,14 @@ gather_one:
     jmp gather_one
 gathered_b:
     vzeroupper
-    ; Fused: the band's interior rows (lo + 1 .. lo + 6) need only the band's
+    ; Fused: the band's interior rows (lo + 1 .. lo + BAND_ROWS - 2) need only the band's
     ; own rows, which this thread has just written: separate and integrate
     ; them now, while they are in its cache. The integrated positions go to
     ; this participant's buffer (it stays in cache too) and each row is
     ; copied home over its start positions as soon as no row next to it is
-    ; left to separate: rows lo + 2 .. lo + 5 now; rows lo + 1 and lo + 6 wait
-    ; in the pending columns for the boundary jobs below and above.
+    ; left to separate: rows lo + 2 .. lo + BAND_ROWS - 3 now; rows lo + 1 and
+    ; lo + BAND_ROWS - 2 wait in the pending columns for the boundary jobs
+    ; below and above.
     cmp grid_fuse_now, 0
     je not_fused
     mov eax, dword ptr [rsp + 24]
@@ -1097,12 +1106,12 @@ gathered_b:
     mov eax, dword ptr [rsp + 24]      ; lo cell
     mov rsi, sim_cell_start
     mov ecx, dword ptr [rsi + rax*4 + GRID_DIM * 4]         ; start of row lo + 1
-    mov edx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
+    mov edx, dword ptr [rsi + rax*4 + BAND_ROWS * GRID_DIM * 4 - GRID_DIM * 4]  ; start of the last row
     mov r9d, dword ptr [rsp + 64]
     call sim_separate_v4
     cmp dword ptr [rsp + 32], 0
     jne not_first
-        ; band 0: row 0 has no row below; rows 0 .. 5 are final
+        ; band 0: row 0 has no row below; rows 0 .. BAND_ROWS - 3 are final
         mov rsi, sim_cell_start
         mov ecx, dword ptr [rsi]
         mov edx, dword ptr [rsi + GRID_DIM * 4]
@@ -1110,7 +1119,7 @@ gathered_b:
         call sim_separate_v4
         mov rsi, sim_cell_start
         mov ecx, dword ptr [rsi]
-        mov edx, dword ptr [rsi + 6 * GRID_DIM * 4]
+        mov edx, dword ptr [rsi + BAND_ROWS * GRID_DIM * 4 - 2 * GRID_DIM * 4]
         mov r8d, dword ptr [rsp + 64]
         call fz_rows_home
         jmp first_done
@@ -1124,13 +1133,13 @@ gathered_b:
         mov eax, dword ptr [rsp + 24]
         mov rsi, sim_cell_start
         mov ecx, dword ptr [rsi + rax*4 + 2 * GRID_DIM * 4]
-        mov edx, dword ptr [rsi + rax*4 + 6 * GRID_DIM * 4]
+        mov edx, dword ptr [rsi + rax*4 + BAND_ROWS * GRID_DIM * 4 - 2 * GRID_DIM * 4]
         mov r8d, dword ptr [rsp + 64]
-        call fz_rows_home              ; rows lo + 2 .. lo + 5
+        call fz_rows_home              ; rows lo + 2 .. lo + BAND_ROWS - 3
     first_done:
     cmp dword ptr [rsp + 32], GRID_BANDS - 1
     jne not_last
-        ; the last band: row 1023 has no row above; rows lo + 6, lo + 7 are final
+        ; the last band: row 1023 has no row above; its last two rows are final
         mov rsi, sim_cell_start
         mov ecx, dword ptr [rsi + (GRID_CELLS - GRID_DIM) * 4]
         mov edx, dword ptr [rsp + 8]
@@ -1138,7 +1147,7 @@ gathered_b:
         call sim_separate_v4
         mov eax, dword ptr [rsp + 24]
         mov rsi, sim_cell_start
-        mov ecx, dword ptr [rsi + rax*4 + 6 * GRID_DIM * 4]
+        mov ecx, dword ptr [rsi + rax*4 + BAND_ROWS * GRID_DIM * 4 - 2 * GRID_DIM * 4]
         mov edx, dword ptr [rsp + 8]
         mov r8d, dword ptr [rsp + 64]
         call fz_rows_home
@@ -1146,10 +1155,10 @@ gathered_b:
     not_last:
         mov eax, dword ptr [rsp + 24]
         mov rsi, sim_cell_start
-        mov ecx, dword ptr [rsi + rax*4 + 6 * GRID_DIM * 4]
-        mov edx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]
+        mov ecx, dword ptr [rsi + rax*4 + BAND_ROWS * GRID_DIM * 4 - 2 * GRID_DIM * 4]
+        mov edx, dword ptr [rsi + rax*4 + BAND_ROWS * GRID_DIM * 4 - GRID_DIM * 4]
         mov r8d, dword ptr [rsp + 64]
-        call fz_rows_stash             ; row lo + 6
+        call fz_rows_stash             ; row lo + BAND_ROWS - 2
     last_done:
     ; Boundary rows. The two rows either side of a boundary between bands
     ; need only those two bands. Each band, when finished, publishes its
@@ -1181,7 +1190,7 @@ gathered_b:
     sub eax, GRID_DIM
     call grid_boundary                 ; rows lo - 1, lo
 below_done:
-    ; the boundary above: rows lo + 7 and lo + 8
+    ; the boundary above: the band's last row and the next band's first
     mov eax, dword ptr [rsp + 32]
     cmp eax, GRID_BANDS - 1
     je above_done
@@ -1196,8 +1205,8 @@ below_done:
     lock cmpxchg dword ptr [rdx + r8*4 + 4], ecx
     jnz above_done
     mov eax, dword ptr [rsp + 24]
-    add eax, 7 * GRID_DIM
-    call grid_boundary                 ; rows lo + 7, lo + 8
+    add eax, BAND_ROWS * GRID_DIM - GRID_DIM
+    call grid_boundary
 above_done:
 not_fused:
     add rsp, 104
@@ -1536,7 +1545,7 @@ old_ranges:
     mov edx, dword ptr [r8 + rax*4 + 4]
     mov dword ptr [r9 + rcx*4], edx
     mov eax, ecx
-    shl eax, 3                         ; the band's first row
+    shl eax, BAND_ROW_SHIFT            ; the band's first row
     mov edx, eax
     sub eax, grid_d_rows
     xor r11d, r11d
