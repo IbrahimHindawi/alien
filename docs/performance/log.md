@@ -602,3 +602,21 @@ Contest matrix on this machine, interleaved, 5 rounds, quiet machine
 Contest matrix, interleaved, 5 rounds (C / asm):
 100k 1T **1.13**, 100k 16T **1.58**, 1M 1T 0.99, 1M 16T **1.31**,
 dense 1T **1.08**, dense 16T 0.98.
+
+## 2026-11-09: help inside band jobs (kept), and the last single-thread tries
+
+- **Help with rows of bands in progress** (8d15021): in the local build a
+  band, once built, publishes its columns and rows; its rows are taken one at
+  a time by itself and by any participant out of band jobs (a pool_help hook
+  in pool_run_chunks); it waits for its helpers before its rows go out. The
+  dense crowd's large band jobs no longer leave a tail: dense 16T -3%
+  (C / asm 0.98 -> 1.00). Pieces of 1024 slots instead of rows: level.
+- In-place integration only with more than one participant (320254e): 1M 1T
+  -1%; 2T and 4T keep it (alone the copies cost more than they save).
+- Discarded: 8-row bands with the local build (dense 16T +33%), velocities
+  copied only for a band's own rows (the prefetcher streams them anyway),
+  software prefetch in the merge (level).
+
+Contest matrix, interleaved, 7 rounds (C / asm):
+100k 1T **1.12**, 100k 16T **1.55**, 1M 1T 0.99, 1M 16T **1.33**,
+dense 1T **1.08**, dense 16T 1.00.
