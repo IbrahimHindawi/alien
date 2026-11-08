@@ -691,17 +691,31 @@ mcount:
     inc ecx
     jmp mcount
 mcounted:
-    ; exclusive prefix over the band's 8192 counters (only cells with movers matter)
+    ; exclusive prefix over the band's counters, 8 per step (as the band's
+    ; cell starts: shifts within each half, the low half's last into the high)
     lea rdi, [r11 + r9*4]
-    xor edx, edx
+    vpxor xmm1, xmm1, xmm1
+    vmovdqa ymm4, ymmword ptr k_bcast7
+    vmovdqa ymm5, ymmword ptr k_bcast3
+    vmovdqa ymm3, ymmword ptr k_upper_half
     xor ecx, ecx
 mprefix:
-    mov eax, dword ptr [rdi + rcx*4]
-    mov dword ptr [rdi + rcx*4], edx
-    add edx, eax
-    inc ecx
+    vmovdqu ymm0, ymmword ptr [rdi + rcx*4]
+    vpslldq ymm2, ymm0, 4
+    vpaddd ymm0, ymm0, ymm2
+    vpslldq ymm2, ymm0, 8
+    vpaddd ymm0, ymm0, ymm2
+    vpermd ymm2, ymm5, ymm0
+    vpand ymm2, ymm2, ymm3
+    vpaddd ymm0, ymm0, ymm2
+    vpaddd ymm0, ymm0, ymm1
+    vpsubd ymm2, ymm0, ymmword ptr [rdi + rcx*4]
+    vmovdqu ymmword ptr [rdi + rcx*4], ymm2
+    vpermd ymm1, ymm4, ymm0
+    add ecx, 8
     cmp ecx, BAND_CELLS
     jb mprefix
+    vzeroupper
     ; place into the sorted region (slot ids at the band's mover offset) with keys
     xor ecx, ecx
 mplace:
