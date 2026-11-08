@@ -552,6 +552,11 @@ Measured and discarded:
   ~20 B per entity), which needs the neighbours' old rows no longer read.
 - Integer compare for `d2 < 1` (off the FP add pipes): level; the candidate
   loop waits on its in-order sums.
+- Dense crowd at 16 threads: the threads are busy 87.5% of the band phase.
+  Bands handed out largest first, dealt round-robin to the pool's slices:
+  +1.5% (the affinity of bands to cores is lost, and one dense band job is
+  ~1/5 of the phase, so the tail stays). Discarded.
+- The profiling counters' locked adds (~770 per tick): no measurable cost.
 - A higher threshold for the merge's insertion sort, skipping all-stayer
   blocks in the collect, longer worker spin: level or worse.
 
