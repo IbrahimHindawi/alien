@@ -150,3 +150,17 @@ about the C engine's and the matrix to three wins and three ties:
 The ties are within the run-to-run spread. Both engines lose time from 8 to
 16 threads (hyperthreads share a core's bandwidth and L2); the C engine is
 still ~6% ahead at 8 threads on 1M.
+
+Later the same night a second band build for bandwidth-bound ticks (each
+band rebuilds its rows and one row either side in a cache-resident buffer
+and streams its output out, no boundary jobs; log.md, 2026-11-09) took the
+1M 16-thread cell from a tie to a clear win:
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1722 | 1946 | **1.13** |
+| 100k, 16 threads | 212 | 334 | **1.58** |
+| 1M, 1 thread | 14302 | 14172 | 0.99 |
+| 1M, 16 threads | 2720 | 3574 | **1.31** |
+| 1M dense, 1 thread | 29720 | 32069 | **1.08** |
+| 1M dense, 16 threads | 5480 | 5345 | 0.98 |

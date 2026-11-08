@@ -571,3 +571,34 @@ Contest matrix on this machine, interleaved, 5 rounds, quiet machine
 | 1M, 16 threads | 0.57 | 0.99 |
 | 1M dense, 1 thread | 0.96 | **1.06** |
 | 1M dense, 16 threads | 0.60 | 0.98 |
+
+## 2026-11-09: the local band build (kept), the stage counters (fixed)
+
+- **Local band build** (`grid_local.rasm`, 8f91961) for bandwidth-bound
+  ticks: windowed and fused builds of large populations on 8 or more
+  threads. Each band job rebuilds its rows and one row either side into its
+  participant's cache-resident buffer (the region's old cell sizes from the
+  last build's starts, a collect over the region widened by the largest
+  move, a prefix, the merge), separates and integrates its own rows there
+  (sim_separate_v4 now takes all its columns from a per-participant table),
+  and streams them out with `vmovntps`: whole lines, never read first. No
+  boundary jobs, no waiting rows, no claims. This build's cell starts go to a
+  second array, so every job reads the old ones. 1M 16T 3.57 -> 2.72 ms
+  (C / asm 0.98 -> 1.31). On one thread it is 16% slower (the two extra rows
+  are built twice and memory is not the bottleneck); the crossover is 8
+  threads (6T: 3.46 windowed vs 3.59 local; 8T: 3.11 local). The dense crowd
+  takes it too but does not gain: its tick is separation compute.
+- **Stage counters fixed** (4fc612c): rasm indexes arrays by element, and
+  `grid_stage_cyc[8]`, `[16]`, `[24]`, `[32]` were byte offsets: they wrote
+  past the 5-element array since the counters were added, lately into the
+  local build's row table during the band phase (the hashes passed by
+  timing). Found because the counters read garbage in local ticks.
+- Dense 16T: largest-first order with the local build, +3 to 5%; the local
+  build off for concentrated populations: level. Dense groups are 98% fast
+  path (2.4% redo exactly at the cap); ~130 candidates per 8-lane group
+  against ~30 in sparse: 16-lane groups sharing each candidate are the known
+  remedy (fewer candidate-lane steps per entity).
+
+Contest matrix, interleaved, 5 rounds (C / asm):
+100k 1T **1.13**, 100k 16T **1.58**, 1M 1T 0.99, 1M 16T **1.31**,
+dense 1T **1.08**, dense 16T 0.98.
