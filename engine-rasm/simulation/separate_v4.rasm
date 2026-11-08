@@ -330,6 +330,20 @@ group:
     jne exact                          ; the last group reached the cap: go exact
     ; fast: no self test, no cap, no lane mask. A lane meets itself once, adding
     ; +0.0f (dx = dz = 0) and one hit; lanes past the group are never stored.
+    ; dense rows (more than 3 candidates per lane in the window on the
+    ; lanes' own row) check the cap at every step and redo from that step;
+    ; sparse ones check it once per group (it is never reached there)
+    mov ecx, dword ptr [rsp + 236]
+    inc ecx
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov eax, dword ptr [r15 + rdx*4]
+    sub eax, dword ptr [r15 + rcx*4]
+    mov edx, dword ptr [rsp + 224]
+    lea edx, [rdx + rdx*2]
+    cmp eax, edx
+    ja c_fast
     mov r9d, 3
 fast_row:
     cmp edi, GRID_DIM
@@ -360,6 +374,139 @@ fast_row:
     cmp r10d, eax
     jg fast_one
 fast_four:
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    vbroadcastss ymm6, dword ptr [r12 + r8*4 + 4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4 + 4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    vbroadcastss ymm6, dword ptr [r12 + r8*4 + 8]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4 + 8]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    vbroadcastss ymm6, dword ptr [r12 + r8*4 + 12]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4 + 12]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    add r8d, 4
+    cmp r8d, r10d
+    jb fast_four
+    jmp fast_next_row
+fast_one:
+    vbroadcastss ymm6, dword ptr [r12 + r8*4]
+    vbroadcastss ymm7, dword ptr [r13 + r8*4]
+    vsubps ymm8, ymm0, ymm6
+    vsubps ymm9, ymm1, ymm7
+    vmulps ymm10, ymm8, ymm8
+    vmulps ymm11, ymm9, ymm9
+    vaddps ymm10, ymm10, ymm11
+    vcmpps ymm11, ymm10, ymm14, 17
+    vsubps ymm10, ymm14, ymm10
+    vandps ymm10, ymm10, ymm11
+    vmulps ymm8, ymm8, ymm10
+    vmulps ymm9, ymm9, ymm10
+    vaddps ymm2, ymm2, ymm8
+    vaddps ymm3, ymm3, ymm9
+    vpsubd ymm4, ymm4, ymm11
+    inc r8d
+    cmp r8d, r10d
+    jb fast_one
+fast_next_row:
+    inc edi
+    dec r9d
+    jnz fast_row
+    ; the cap, once per group: each lane met itself once, so more than 17
+    ; hits is more than 16 others, where the spec stops counting. Then (rarely)
+    ; the group again, exactly, from its first row
+    vpcmpgtd ymm6, ymm4, ymmword ptr k_sep_cap17
+    vptest ymm6, ymm5
+    jz separated
+    vxorps xmm2, xmm2, xmm2
+    vxorps xmm3, xmm3, xmm3
+    vpxor xmm4, xmm4, xmm4
+    mov edi, dword ptr [rsp + 236]
+    vmovdqa ymm15, ymmword ptr k_sep_cap
+    vmovd xmm13, esi
+    vpbroadcastd ymm13, xmm13
+    vpaddd ymm13, ymm13, ymmword ptr k_iota
+    jmp exact
+c_fast:
+    mov r9d, 3
+c_fast_row:
+    cmp edi, GRID_DIM
+    jae c_fast_next_row
+    mov ecx, edi
+    shl ecx, GRID_SHIFT
+    lea edx, [rcx + rbp + 1]
+    add ecx, r11d
+    mov r8d, dword ptr [r15 + rcx*4]
+    mov r10d, dword ptr [r15 + rdx*4]
+    cmp r8d, r10d
+    jae c_fast_next_row
+    ; four per step when the overrun stays in this row: the slots past the
+    ; run are cells hi + 1 .. hi + 7 of the same row, >= 2 m from every lane, so they
+    ; never hit. w is masked once: a missed lane adds dx * 0 = +-0.0f, which
+    ; changes no sum (a sum is never -0.0f). Else one per step.
+    ; bound: the start of cell min(hi + 8, last) of this row, a counter this
+    ; band owns (the next row's start may belong to the next band, unbuilt)
+    lea eax, [rbp + 8]
+    mov edx, GRID_DIM - 1
+    cmp eax, edx
+    cmova eax, edx
+    mov edx, edi
+    shl edx, GRID_SHIFT
+    add eax, edx
+    mov eax, dword ptr [r15 + rax*4]
+    sub eax, 3
+    cmp r10d, eax
+    jg c_fast_one
+c_fast_four:
     ; the state before this step, in case a lane passes 16 in it
     vmovaps ymm12, ymm2
     vmovaps ymm13, ymm3
@@ -432,9 +579,9 @@ fast_four:
     jnz step_exact
     add r8d, 4
     cmp r8d, r10d
-    jb fast_four
-    jmp fast_next_row
-fast_one:
+    jb c_fast_four
+    jmp c_fast_next_row
+c_fast_one:
     vmovaps ymm12, ymm2
     vmovaps ymm13, ymm3
     vmovdqa ymm15, ymm4
@@ -459,11 +606,11 @@ fast_one:
     jnz step_exact
     inc r8d
     cmp r8d, r10d
-    jb fast_one
-fast_next_row:
+    jb c_fast_one
+c_fast_next_row:
     inc edi
     dec r9d
-    jnz fast_row
+    jnz c_fast_row
     jmp separated
 step_exact:
     vmovaps ymm2, ymm12
