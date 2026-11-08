@@ -622,3 +622,19 @@ Contest matrix, interleaved, 7 rounds (C / asm):
 dense 1T **1.08**, dense 16T 1.00.
 - One thread: integrating into the participant's buffer and streaming each
   call's positions out to sim_pos3 (no read for ownership): +2%. Discarded.
+
+## 2026-11-09: the cap checked once per sparse group (kept)
+
+- Separation (d2ef715): the fast loop saved its state and checked the
+  16-neighbour cap at every step of 4 candidates (to redo from that step).
+  Sparse groups never reach the cap: they now check it once per group
+  (more than 17 hits, each lane meeting itself once) and redo the whole
+  group exactly if needed. Dense groups (more than 3 candidates per lane on
+  the lanes' own row) keep the per-step check: redoing whole dense groups
+  was +17%. 1M 1T -3%, 100k -5%, dense level.
+- Discarded: skipping the per-step save and check in dense groups while no
+  lane has more than 12 hits (+3 to 8%: the branch mispredicts).
+
+Contest matrix, interleaved, 7 rounds (C / asm):
+100k 1T **1.17**, 100k 16T **1.64**, 1M 1T **1.01**, 1M 16T **1.36**,
+dense 1T **1.09**, dense 16T 1.00.
