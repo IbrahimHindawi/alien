@@ -29,21 +29,23 @@
 ; self test against sim_grid and every reference hash check it), and a tick's
 ; work is a sequential pass plus work in proportion to the movers.
 
-#define BAND_ROWS 8
-#define BAND_SHIFT 13
-#define BAND_CELLS 8192
-#define GRID_BANDS 128
+#define BAND_ROWS 4
+; BAND_LOG is log2 of BAND_ROWS
+#define BAND_LOG 2
+#define BAND_SHIFT 12
+#define BAND_CELLS 4096
+#define GRID_BANDS 256
 #define BIN_CHUNK 16384
 #define BIN_CHUNKS 64
 
 band_total: [GRID_BANDS]u32 = {}
 grid_live: u32 = 0
 band_offset: [GRID_BANDS]u32 = {}
-bin_hist: [8192]u32[align(64)] = {}    ; [chunk * GRID_BANDS + band]
-bin_off: [8192]u32[align(64)] = {}
+bin_hist: [16384]u32[align(64)] = {}    ; [chunk * GRID_BANDS + band]
+bin_off: [16384]u32[align(64)] = {}
 sim_band_ids: *u32 = 0                  ; the movers by band (storage indices, then slots)
-mov_hist: [8192]u32[align(64)] = {}     ; movers: [chunk * GRID_BANDS + band]
-mov_off: [8192]u32[align(64)] = {}
+mov_hist: [16384]u32[align(64)] = {}     ; movers: [chunk * GRID_BANDS + band]
+mov_off: [16384]u32[align(64)] = {}
 mov_band_off: [GRID_BANDS]u32 = {}
 mov_band_total: [GRID_BANDS]u32 = {}
 grid_old_count: u32 = 0                 ; storage at the start of the build
@@ -54,7 +56,7 @@ grid_windowed: u32 = 0                  ; this build counts from row windows (no
 grid_count_error: u32 = 0
 grid_build_id: u32 = 0                  ; this build's stamp
 band_done: [GRID_BANDS]u32 = {}         ; the stamp of the build that last finished each band
-edge_claim: [129]u32 = {}               ; [b]: the rows at the boundary below band b are done
+edge_claim: [257]u32 = {}               ; [b]: the rows at the boundary below band b are done
 #define MERGE_FEW 256
 #define MERGE_NONE 0x7FFFFFFFFFFFFFFF
 k_shift1: [8]const u32[align(32)] = { 0, 0, 1, 2, 3, 4, 5, 6 }
@@ -81,7 +83,7 @@ grid_bin_job: proc(begin: u32, end: u32, chunk: u32) = {
     mov edi, edx                       ; end
     ; this chunk's histogram row, zeroed
     mov eax, r8d
-    shl eax, 9                         ; chunk * GRID_BANDS * 4
+    shl eax, 12 - BAND_LOG             ; chunk * GRID_BANDS * 4
     lea rsi, bin_hist
     add rsi, rax
     lea r11, mov_hist
@@ -160,7 +162,7 @@ counted:
 grid_bucket_job: proc(begin: u32, end: u32, chunk: u32) = {
     push rsi
     mov eax, r8d
-    shl eax, 9
+    shl eax, 12 - BAND_LOG             ; chunk * GRID_BANDS * 4
     lea rsi, mov_off
     add rsi, rax
     mov r10, sim_cell
@@ -266,7 +268,7 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     ; windowed: the movers come from the band's old rows widened by the
     ; largest move, and from the spawns after the sorted slots, ascending
     mov eax, ebx
-    shl eax, 3                         ; the band's first row
+    shl eax, BAND_SHIFT - GRID_SHIFT   ; the band's first row
     mov edx, eax
     sub eax, grid_d_rows
     xor ecx, ecx
@@ -910,7 +912,7 @@ gathered_b:
     mov eax, dword ptr [rsp + 24]      ; lo cell
     mov rsi, sim_cell_arr
     mov ecx, dword ptr [rsi + rax*4 + 4 + GRID_DIM * 4]         ; start of row lo + 1
-    mov edx, dword ptr [rsi + rax*4 + 4 + 7 * GRID_DIM * 4]     ; start of row lo + 7
+    mov edx, dword ptr [rsi + rax*4 + 4 + 3 * GRID_DIM * 4]     ; start of row lo + 3
     call sim_separate_v4
     ; Boundary rows. The two rows either side of a boundary between bands
     ; need only those two bands. Each band, when finished, publishes its
@@ -975,8 +977,8 @@ below_done:
     jnz above_done
     mov rsi, sim_cell_start
     mov eax, dword ptr [rsp + 24]
-    mov ecx, dword ptr [rsi + rax*4 + 7 * GRID_DIM * 4]  ; start of row lo + 7
-    mov edx, dword ptr [rsi + rax*4 + 9 * GRID_DIM * 4]  ; start of row lo + 9
+    mov ecx, dword ptr [rsi + rax*4 + 3 * GRID_DIM * 4]  ; start of row lo + 3
+    mov edx, dword ptr [rsi + rax*4 + 5 * GRID_DIM * 4]  ; start of row lo + 5
     call sim_separate_v4
 above_done:
 not_fused:
@@ -1057,7 +1059,7 @@ bottom_done:
     lea rax, edge_claim
     cmp dword ptr [rax + rdi*4 + 4], 0
     jne top_done                       ; done by the next band's job
-    mov ecx, dword ptr [rsi + rbx*4 + 7 * GRID_DIM * 4]
+    mov ecx, dword ptr [rsi + rbx*4 + 3 * GRID_DIM * 4]
     mov edx, dword ptr [rsi + rbx*4 + BAND_CELLS * 4]
     call sim_separate_v4
 top_done:
