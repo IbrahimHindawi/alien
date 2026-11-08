@@ -18,6 +18,7 @@ pool_workers: u32 = 0                  ; worker threads (the main thread is extr
 pool_gen: u32 = 0                      ; incremented to start a job
 pool_quit: u32 = 0
 pool_job: u64 = 0                      ; proc(begin: u32, end: u32, chunk: u32)
+pool_help: u64 = 0                     ; proc(part: u32) for participants out of chunks, or 0
 pool_total: u32 = 0
 pool_chunk: u32 = 0
 pool_chunks: u32 = 0
@@ -152,6 +153,14 @@ next_slice:
 wrapped:
     cmp edi, esi
     jne take
+    ; no chunk left: the job's helper, if it has one (work its chunks left
+    ; for others, e.g. rows of a band still in progress)
+    mov rax, pool_help
+    test rax, rax
+    jz no_help
+    mov ecx, esi
+    call rax
+no_help:
     add rsp, 40
     pop r12
     pop rdi

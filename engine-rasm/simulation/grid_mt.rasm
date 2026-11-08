@@ -46,6 +46,9 @@
 #define BAND_TABLE_SHIFT 10
 ; BIN_CHUNKS * GRID_BANDS
 #define BIN_HIST_N 16384
+; GRID_BANDS * 8, GRID_BANDS * (BAND_ROWS + 1)
+#define GRID_BANDS_8 2048
+#define GRID_BANDS_ROWS1 1280
 #define BIN_CHUNK 16384
 #define BIN_CHUNKS 64
 
@@ -1681,10 +1684,22 @@ inplace_decided:
     lea rdi, next_mov_total
     mov ecx, GRID_BANDS
     rep stosd
+    ; (a local build: idle participants help with rows of bands in progress)
+    mov hb_open_n, 0
+    lea rdi, hb_open_ready
+    xor eax, eax
+    mov ecx, GRID_BANDS
+    rep stosd
+    cmp grid_local, 0
+    je no_help
+    mov rax, grid_help&
+    mov pool_help, rax
+no_help:
     mov rcx, grid_band_job_timed&
     mov edx, GRID_BANDS
     mov r8d, 1
     call pool_dispatch
+    mov pool_help, 0
     call grid_stamp
     mov rcx, rax
     sub rcx, qword ptr [rsp + 24]

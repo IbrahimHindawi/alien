@@ -181,6 +181,97 @@ done:
     ret
 }
 
+; Rows of local band jobs in progress, for idle participants (pool_help):
+; each band, once built, publishes its columns (hb_tab, a copy of its table
+; entry) and its rows' slots (hb_rows), and its rows are taken one at a time
+; from hb_next, by itself and by any participant out of band jobs. A helper
+; counts itself in hb_busy before taking a row, and the band's job waits for
+; hb_busy to drop to 0 before its rows go out: once its own take fails no
+; helper can take a row, and every helper that took one counted itself first.
+hb_tab: [GRID_BANDS_8]u64 = {}
+hb_rows: [GRID_BANDS_ROWS1]u32 = {}
+hb_next: [GRID_BANDS]u32 = {}
+hb_busy: [GRID_BANDS]u32 = {}
+hb_open: [GRID_BANDS]u32 = {}           ; the bands published this build, in order
+hb_open_ready: [GRID_BANDS]u32 = {}     ; (entry i written)
+hb_open_n: u32 = 0
+
+; ecx: this participant, out of band jobs. Separates rows of published bands
+; until none is left to take.
+grid_help: proc(part: u32) = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    sub rsp, 32                        ; 8 + 40 + 32 = 80
+    mov r12d, ecx
+again:
+    xor esi, esi                       ; a row taken this pass
+    xor edi, edi
+scan:
+    cmp edi, hb_open_n
+    jae scanned
+    lea rax, hb_open_ready
+    cmp dword ptr [rax + rdi*4], 0
+    je next_band                       ; (being written)
+    lea rax, hb_open
+    mov ebx, dword ptr [rax + rdi*4]
+take:
+    lea rax, hb_next
+    cmp dword ptr [rax + rbx*4], BAND_ROWS
+    jae next_band
+    lea rax, hb_busy
+    lock inc dword ptr [rax + rbx*4]
+    mov eax, 1
+    lea rdx, hb_next
+    lock xadd dword ptr [rdx + rbx*4], eax
+    cmp eax, BAND_ROWS
+    jae release
+    mov r13d, eax
+    ; the band's columns into this participant's entry
+    mov eax, ebx
+    shl eax, 6
+    lea rdx, hb_tab
+    add rdx, rax
+    mov eax, r12d
+    shl eax, 6
+    lea rcx, fz_out_tab
+    add rcx, rax
+    vmovdqu ymm0, ymmword ptr [rdx]
+    vmovdqu ymmword ptr [rcx], ymm0
+    vmovdqu ymm0, ymmword ptr [rdx + 32]
+    vmovdqu ymmword ptr [rcx + 32], ymm0
+    vzeroupper
+    imul eax, ebx, BAND_ROWS + 1
+    add eax, r13d
+    lea rdx, hb_rows
+    mov ecx, dword ptr [rdx + rax*4]
+    mov edx, dword ptr [rdx + rax*4 + 4]
+    mov r9d, r12d
+    call sim_separate_v4
+    mov esi, 1
+    lea rax, hb_busy
+    lock dec dword ptr [rax + rbx*4]
+    jmp take                           ; (more of this band's rows)
+release:
+    lea rax, hb_busy
+    lock dec dword ptr [rax + rbx*4]
+next_band:
+    inc edi
+    jmp scan
+scanned:
+    test esi, esi
+    jnz again
+    add rsp, 32
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+
 ; r8d: band, r9d: participant. The band's rows in grid order, separated and
 ; integrated, into the spare columns.
 grid_band_local: proc(begin: u32, end: u32, band: u32) = {
@@ -802,10 +893,66 @@ own_starts:
     mov qword ptr [r11 + 48], rdx
     lea rdx, [r10 + 4]
     mov qword ptr [r11 + 56], rdx
-    mov ecx, r12d
-    mov edx, r13d
+    ; the rows are independent now: publish them (the columns, each row's
+    ; slots) for idle participants, then take them one at a time
+    mov ecx, dword ptr [rsp + 160]     ; band
+    mov eax, ecx
+    shl eax, 6
+    lea rdx, hb_tab
+    add rdx, rax
+    vmovdqu ymm0, ymmword ptr [r11]
+    vmovdqu ymmword ptr [rdx], ymm0
+    vmovdqu ymm0, ymmword ptr [r11 + 32]
+    vmovdqu ymmword ptr [rdx + 32], ymm0
+    vzeroupper
+    imul eax, ecx, BAND_ROWS + 1
+    lea rdx, hb_rows
+    lea rdx, [rdx + rax*4]
+    mov eax, dword ptr [rsp + 164]     ; the band's first cell
+    xor r8d, r8d
+publish_rows:
+    mov r9d, dword ptr [r10 + rax*4 + 4]
+    mov dword ptr [rdx + r8*4], r9d
+    add eax, GRID_DIM
+    inc r8d
+    cmp r8d, BAND_ROWS
+    jbe publish_rows
+    lea rax, hb_next
+    mov dword ptr [rax + rcx*4], 0
+    lea rax, hb_busy
+    mov dword ptr [rax + rcx*4], 0
+    mov eax, 1
+    lock xadd hb_open_n, eax           ; (a full fence: the above is visible first)
+    lea rdx, hb_open
+    mov dword ptr [rdx + rax*4], ecx
+    lea rdx, hb_open_ready
+    mov dword ptr [rdx + rax*4], 1
+own_rows:
+    mov ecx, dword ptr [rsp + 160]
+    mov eax, 1
+    lea rdx, hb_next
+    lock xadd dword ptr [rdx + rcx*4], eax
+    cmp eax, BAND_ROWS
+    jae own_done
+    imul ecx, ecx, BAND_ROWS + 1
+    add ecx, eax
+    lea rdx, hb_rows
+    mov eax, ecx
+    mov ecx, dword ptr [rdx + rax*4]
+    mov edx, dword ptr [rdx + rax*4 + 4]
     mov r9d, dword ptr [rsp + 64]
     call sim_separate_v4
+    jmp own_rows
+own_done:
+    ; the helpers on this band's rows done before its rows go out
+    mov ecx, dword ptr [rsp + 160]
+    lea rdx, hb_busy
+helpers:
+    cmp dword ptr [rdx + rcx*4], 0
+    je helped
+    pause
+    jmp helpers
+helped:
     ; the band's rows out, streaming: integrated x, z, velocities, sequences
     mov ebx, r13d
     sub ebx, r12d                      ; count
