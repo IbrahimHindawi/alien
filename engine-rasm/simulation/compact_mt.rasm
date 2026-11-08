@@ -106,12 +106,12 @@ dead:
     je uncounted
     mov dword ptr [r13 + rax*4], -1
     mov r8d, edx
+    and r8d, 0x7FFFFFFF
     shr r8d, BAND_SHIFT
     lea r13, next_band_total
     lock dec dword ptr [r13 + r8*4]
-    mov r13, sim_slot_cell
-    cmp edx, dword ptr [r13 + rax*4]
-    je uncounted
+    test edx, edx
+    jns uncounted                      ; it kept its cell: not a mover
     lea r13, next_mov_total
     lock dec dword ptr [r13 + r8*4]
 uncounted:
@@ -194,12 +194,12 @@ no_event:
     je counted
     mov dword ptr [r9 + rax*4], -1
     mov ecx, edx
+    and ecx, 0x7FFFFFFF
     shr ecx, BAND_SHIFT
     lea r10, next_band_total
     dec dword ptr [r10 + rcx*4]
-    mov r9, sim_slot_cell
-    cmp edx, dword ptr [r9 + rax*4]
-    je counted
+    test edx, edx
+    jns counted                        ; it kept its cell (bit 31 clear): not a mover
     lea r10, next_mov_total
     dec dword ptr [r10 + rcx*4]
 counted:

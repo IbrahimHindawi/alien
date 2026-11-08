@@ -28,12 +28,12 @@ fz_inplace: u32 = 0                    ; this build's fused bands integrate in p
 #define FZ_INPLACE_MIN 262144
 fz_pend_x: *f32 = 0                    ; integrated rows waiting for their boundary job (sim_pos3)
 fz_pend_z: *f32 = 0                       ; per participant 1 << FZ_PART_SHIFT bytes: x, then z (sim_alloc)
-fz_cell: *u32 = 0                      ; the next build's cell of each slot (written here)
-fz_slot_cell: *u32 = 0                 ; the slots' cells as of this build (the next one's old cells)
+fz_cell: *u32 = 0                      ; the next build's cell of each slot, bit 31: changed cell (written here)
 next_band_total: [128]u32 = {}         ; the next build's members and movers per band
 next_mov_total: [128]u32 = {}
 grid_maxdisp: u32 = 0                  ; the largest |move| on one axis this tick (f32 bits, >= 0)
 k_sep_cap17: [8]const u32[align(32)] = { 17, 17, 17, 17, 17, 17, 17, 17 }
+k_cell_moved: [8]const u32[align(32)] = { 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000, 0x80000000 }
 k_abs: [8]const u32[align(32)] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF }
 
 ; ecx: base slot, edx: participant. Its outputs go to its own buffer, slot
@@ -576,7 +576,10 @@ separated:
     vmaxps ymm10, ymm10, ymmword ptr [rsp + 240]
     vmovups ymmword ptr [rsp + 240], ymm10
     ; the lanes' new cells for the next build: per slot, and counted per band
-    ; (members, and movers against the slot's cell as of this build)
+    ; (members, and movers). A slot's cell in this build's order is the cell
+    ; of its start position (positions change only here and at spawns), so a
+    ; lane that changes cell is known here: bit 31 of its stored cell says so,
+    ; and the next build needs no column of old cells.
     vaddps ymm10, ymm8, ymmword ptr k_world_half
     vmulps ymm10, ymm10, ymmword ptr k_inv_cell
     vcvttps2dq ymm10, ymm10
@@ -584,11 +587,22 @@ separated:
     vmulps ymm11, ymm11, ymmword ptr k_inv_cell
     vcvttps2dq ymm11, ymm11
     vpslld ymm11, ymm11, GRID_SHIFT
-    vpaddd ymm10, ymm10, ymm11
-    vmovdqu ymmword ptr [rsp], ymm10
+    vpaddd ymm10, ymm10, ymm11                     ; new cells
+    vaddps ymm12, ymm0, ymmword ptr k_world_half
+    vmulps ymm12, ymm12, ymmword ptr k_inv_cell
+    vcvttps2dq ymm12, ymm12
+    vaddps ymm13, ymm1, ymmword ptr k_world_half
+    vmulps ymm13, ymm13, ymmword ptr k_inv_cell
+    vcvttps2dq ymm13, ymm13
+    vpslld ymm13, ymm13, GRID_SHIFT
+    vpaddd ymm12, ymm12, ymm13                     ; cells as of this build
+    vpcmpeqd ymm12, ymm12, ymm10                   ; kept their cell
+    vmovmskps r11d, ymm12
+    vpandn ymm13, ymm12, ymmword ptr k_cell_moved
+    vpor ymm13, ymm13, ymm10                       ; as stored
+    vmovdqu ymmword ptr [rsp], ymm13
     mov ecx, dword ptr [rsp + 224]
     mov r14, fz_cell
-    mov r11, fz_slot_cell
     ; the usual case, all lanes in one band: one store, two popcounts
     vpsrld ymm11, ymm10, BAND_SHIFT
     vpbroadcastd ymm12, xmm11
@@ -600,18 +614,15 @@ separated:
     jne cell_lanes                     ; the group spans bands: lane by lane
     cmp ecx, 8
     jb cells_masked
-    vmovdqu ymmword ptr [r14 + rsi*4], ymm10
+    vmovdqu ymmword ptr [r14 + rsi*4], ymm13
     jmp cells_stored
 cells_masked:
-    vpmaskmovd ymmword ptr [r14 + rsi*4], ymm5, ymm10
+    vpmaskmovd ymmword ptr [r14 + rsi*4], ymm5, ymm13
 cells_stored:
     vmovd edi, xmm11
     popcnt eax, edx
     add dword ptr [rsp + rdi*4 + 288], eax
-    vmovdqu ymm12, ymmword ptr [r11 + rsi*4]       ; the slots' cells as of this build
-    vpcmpeqd ymm12, ymm12, ymm10
-    vmovmskps eax, ymm12
-    andn eax, eax, edx                 ; valid lanes that changed cell
+    andn eax, r11d, edx                ; valid lanes that changed cell
     popcnt eax, eax
     add dword ptr [rsp + rdi*4 + 800], eax
     jmp cells_counted
@@ -622,10 +633,11 @@ cell_lane:
     lea r8d, [rsi + rdx]
     mov dword ptr [r14 + r8*4], eax
     mov edi, eax
+    and edi, 0x7FFFFFFF
     shr edi, BAND_SHIFT
     inc dword ptr [rsp + rdi*4 + 288]
-    cmp eax, dword ptr [r11 + r8*4]
-    je cell_stays
+    test eax, eax
+    jns cell_stays
     inc dword ptr [rsp + rdi*4 + 800]
 cell_stays:
     inc edx

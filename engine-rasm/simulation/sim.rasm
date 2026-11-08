@@ -44,7 +44,7 @@ sim_sorted_id: *u32 = 0
 sim_seq: *u32 = 0
 sim_next_seq: u32 = 0
 sim_cell2: *u32 = 0                    ; the next build's cells, written by the fused integration
-sim_slot_cell: *u32 = 0                ; cell of each slot, written by the grid build
+sim_slot_cell: *u32 = 0                ; a spare column (the index gather's scratch)
 sim_slot_id: *u32 = 0                  ; storage index of each slot, the grid build's scratch
 sim_identity: *u32 = 0                 ; i at i: the id view of grid-ordered storage
 sim_sorted_x_own: *f32 = 0
@@ -387,8 +387,6 @@ again:
     mov dword ptr [rax + rsi*4], 0x3F800000
     mov rax, sim_seq
     mov dword ptr [rax + rsi*4], esi
-    mov rax, sim_slot_cell
-    mov dword ptr [rax + rsi*4], -1    ; no old cell: the first build places everyone
     inc esi
     jmp again
 done:

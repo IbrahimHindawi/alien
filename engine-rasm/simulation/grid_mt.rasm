@@ -6,19 +6,24 @@
 ; change cell in a tick, so every pass streams memory in order), and the sorted
 ; views (sim_sorted_x/z/id) are the live columns themselves, ids the identity.
 ;
-; The rebuild is incremental. Storage is sorted by (old cell, seq), and
-; sim_slot_cell holds each slot's old cell (-1 for spawns since). An entity
-; whose cell did not change (a stayer) keeps its place relative to the other
-; stayers of its cell, so only the movers need placing:
+; The rebuild is incremental. Storage is sorted by (old cell, seq): the old
+; cells are the last build's cell starts, and no column holds them. sim_cell
+; holds each slot's new cell with bit 31 set when it differs from the old one
+; (the fused integration knows: a slot's old cell is its start position's;
+; spawns are set, the dead are -1). An entity whose cell did not change (a
+; stayer) keeps its place relative to the other stayers of its cell, so only
+; the movers need placing:
 ;
-;   bin       (chunks)      cell[i] (-1 for the dead, who are left behind);
-;                           per chunk, a histogram of bands for everyone
-;                           alive and one for movers
+;   bin       (chunks)      cell[i] (-1 for the dead, who are left behind),
+;                           bit 31 against the old cell (a cursor over the
+;                           last build's starts); per chunk, a histogram of
+;                           bands for everyone alive and one for movers
 ;   offsets   (main)        exclusive prefixes, band-major then chunk: band
 ;                           bases and mover-list offsets
 ;   bucket    (chunks)      the movers' storage indices, grouped by band
-;   band      (per band)    the band's old slot range by binary search on the
-;                           old cells; count stayers and movers per cell;
+;   band      (per band)    the band's old slot range (read from the last
+;                           build's starts before the jobs); count stayers
+;                           and movers per cell;
 ;                           prefix from the band's base; stayers placed
 ;                           (descending, so they end each cell's run, in
 ;                           order); movers placed ahead of them; each mover
@@ -63,6 +68,8 @@ sim_mkey: *u64 = 0                      ; MAX_ENTITIES: the sorted movers' keys
 k_bcast3: [8]const u32[align(32)] = { 3, 3, 3, 3, 3, 3, 3, 3 }
 k_bcast7: [8]const u32[align(32)] = { 7, 7, 7, 7, 7, 7, 7, 7 }
 k_upper_half: [8]const u32[align(32)] = { 0, 0, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF }
+band_old_lo: [129]u32 = {}   ; per band: its first slot in the last build ([GRID_BANDS]: their end)
+band_win: [256]u32 = {}      ; per band: its window's slots in the last build (windowed)
 grid_built_n: u32 = 0                   ; slots sorted by the last build; spawns follow them
 grid_d_rows: u32 = 0                    ; rows any entity can have moved since the last build
 k_disp_rows: const f32 = 0.5            ; a cell is 2 m
@@ -70,13 +77,15 @@ k_disp_rows: const f32 = 0.5            ; a cell is 2 m
 #define WINDOW_MAX_TAIL 4096
 sim_pos3_x: *f32 = 0                    ; the integrated positions of a fused build
 sim_pos3_z: *f32 = 0
-sim_slot_cell2: *u32 = 0                ; the new cells of the slots, swapped in at the end
+sim_slot_cell2: *u32 = 0                ; a full build's scratch: the cell of each output slot
 
 ; ecx: begin, edx: end (entities; begin a multiple of 8), r8d: chunk
 grid_bin_job: proc(begin: u32, end: u32, chunk: u32) = {
     push rbx
     push rsi
     push rdi
+    push r12
+    push r13
     mov ebx, ecx                       ; begin
     mov edi, edx                       ; end
     ; this chunk's histogram row, zeroed
@@ -125,8 +134,31 @@ cells_done:
     vzeroupper
     ; band histogram (the cells are still in L1/L2); the dead of the last
     ; tick get no cell and are left behind
+    ; each slot's old cell: a cursor over the last build's cell starts
+    ; (arr[c + 1]: the start of cell c), r12d the cell, r13d the start of the
+    ; next; slots from grid_built_n on are spawns since (no old cell)
+    mov r9, sim_cell_arr
+    xor r12d, r12d
+    mov edx, GRID_CELLS
+    cmp ebx, grid_built_n
+    jae cursor_set
+search:
+    mov ecx, edx
+    sub ecx, r12d
+    cmp ecx, 1
+    jbe cursor_set
+    shr ecx, 1
+    add ecx, r12d
+    cmp dword ptr [r9 + rcx*4 + 4], ebx
+    ja search_left
+    mov r12d, ecx
+    jmp search
+search_left:
+    mov edx, ecx
+    jmp search
+cursor_set:
+    mov r13d, dword ptr [r9 + r12*4 + 8]
     mov r8, sim_hp
-    mov r9, sim_slot_cell
     vxorps xmm1, xmm1, xmm1
     mov eax, ebx
 count:
@@ -139,9 +171,20 @@ count:
     mov ecx, edx
     shr edx, BAND_SHIFT
     inc dword ptr [rsi + rdx*4]
-    cmp ecx, dword ptr [r9 + rax*4]
+    cmp eax, grid_built_n
+    jae mover
+walk:
+    cmp eax, r13d
+    jb walked
+    inc r12d
+    mov r13d, dword ptr [r9 + r12*4 + 8]
+    jmp walk
+walked:
+    cmp ecx, r12d
     je stayer
+mover:
     inc dword ptr [r11 + rdx*4]        ; a mover (or a spawn)
+    or dword ptr [r10 + rax*4], 0x80000000
 stayer:
     inc eax
     jmp count
@@ -150,6 +193,8 @@ dead:
     inc eax
     jmp count
 counted:
+    pop r13
+    pop r12
     pop rdi
     pop rsi
     pop rbx
@@ -165,15 +210,15 @@ grid_bucket_job: proc(begin: u32, end: u32, chunk: u32) = {
     add rsi, rax
     mov r10, sim_cell
     mov r9, sim_band_ids
-    mov r8, sim_slot_cell
 bucket:
     cmp ecx, edx
     jae done
     mov eax, dword ptr [r10 + rcx*4]
     cmp eax, -1
     je skip                            ; dead
-    cmp eax, dword ptr [r8 + rcx*4]
-    je skip                            ; a stayer
+    test eax, eax
+    jns skip                           ; a stayer (bit 31 clear)
+    and eax, 0x7FFFFFFF
     shr eax, BAND_SHIFT
     mov r11d, dword ptr [rsi + rax*4]
     mov dword ptr [r9 + r11*4], ecx
@@ -187,24 +232,60 @@ done:
     ret
 }
 
-; ecx: key, r10: the old cells, r11d: their count -> eax: the first slot whose
-; old cell >= key (unsigned: spawns' -1 sorts last). Clobbers rdx, r8.
-band_lower_bound: proc() = {
-    xor eax, eax
-    mov edx, r11d
+; ecx: a slot among a band's old slots, edx: its new cell (bit 31 clear; any
+; value for the dead), r9d: the band's first cell, rsi: sim_cell_arr (the
+; last build's starts, arr[c + 1]), r11d: the end of the band's old slots ->
+; eax: the slot's old cell. A cell changer almost always comes from a
+; neighbour of its new cell: those eight go first (a check of the slot
+; against the cell's old slots, exact), then a binary search over the band's
+; cells. Clobbers rdx, r10.
+k_cell_near: [8]const u32 = { 0xFFFFFFFF, 1, 0xFFFFFC00, 0x400, 0xFFFFFBFF, 0xFFFFFC01, 0x3FF, 0x401 }
+old_cell_of: proc() = {
+    push rbx
+    push rdi
+    lea rbx, k_cell_near
+    xor edi, edi
+near:
+    mov eax, edx
+    add eax, dword ptr [rbx + rdi*4]
+    mov r10d, eax
+    sub r10d, r9d
+    cmp r10d, BAND_CELLS
+    jae next_near                      ; not one of the band's cells
+    cmp dword ptr [rsi + rax*4 + 4], ecx
+    ja next_near                       ; it starts after the slot
+    cmp r10d, BAND_CELLS - 1
+    je last_cell
+    cmp dword ptr [rsi + rax*4 + 8], ecx
+    ja found                           ; and the next one after it
+    jmp next_near
+last_cell:
+    cmp r11d, ecx
+    ja found
+next_near:
+    inc edi
+    cmp edi, 8
+    jb near
+    ; the band's last cell starting at or before the slot
+    mov eax, r9d
+    lea r10d, [r9 + BAND_CELLS]
 search:
-    cmp eax, edx
-    jae found
-    lea r8d, [rax + rdx]
-    shr r8d, 1
-    cmp dword ptr [r10 + r8*4], ecx
-    jae left
-    lea eax, [r8 + 1]
+    mov edi, r10d
+    sub edi, eax
+    cmp edi, 1
+    jbe found
+    shr edi, 1
+    add edi, eax
+    cmp dword ptr [rsi + rdi*4 + 4], ecx
+    ja search_left
+    mov eax, edi
     jmp search
-left:
-    mov edx, r8d
+search_left:
+    mov r10d, edi
     jmp search
 found:
+    pop rdi
+    pop rbx
     ret
 }
 
@@ -245,15 +326,13 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     mov dword ptr [rsp + 4], r13d
     lea eax, [r12 + r13]
     mov dword ptr [rsp + 8], eax
-    ; the band's old slots: old cell in [lo, lo + BAND_CELLS)
-    mov r10, sim_slot_cell
-    mov r11d, grid_old_count
-    mov ecx, r9d
-    call band_lower_bound
-    mov dword ptr [rsp + 12], eax
-    lea ecx, [r9 + BAND_CELLS]
-    call band_lower_bound
-    mov dword ptr [rsp + 16], eax
+    ; the band's old slots: old cell in [lo, lo + BAND_CELLS), from the last
+    ; build's cell starts (sim_grid_mt read them before any band job ran)
+    lea rax, band_old_lo
+    mov ecx, dword ptr [rax + rbx*4]
+    mov dword ptr [rsp + 12], ecx
+    mov ecx, dword ptr [rax + rbx*4 + 4]
+    mov dword ptr [rsp + 16], ecx
     ; the band's movers
     lea rax, mov_band_off
     mov edx, dword ptr [rax + rbx*4]
@@ -265,41 +344,33 @@ grid_band_job: proc(begin: u32, end: u32, band: u32) = {
     cmp grid_windowed, 0
     je full_counts
     ; windowed: the movers come from the band's old rows widened by the
-    ; largest move, and from the spawns after the sorted slots, ascending
-    mov eax, ebx
-    shl eax, 3                         ; the band's first row
-    mov edx, eax
-    sub eax, grid_d_rows
-    xor ecx, ecx
-    test eax, eax
-    cmovs eax, ecx
-    add edx, BAND_ROWS
-    add edx, grid_d_rows
-    mov ecx, GRID_DIM
-    cmp edx, ecx
-    cmova edx, ecx
-    shl eax, GRID_SHIFT
-    shl edx, GRID_SHIFT
-    mov dword ptr [rsp + 28], edx
-    mov r11d, grid_old_count
-    mov ecx, eax
-    call band_lower_bound
-    mov dword ptr [rsp + 32], eax
-    mov ecx, dword ptr [rsp + 28]
-    call band_lower_bound
-    mov edx, eax
-    mov ecx, dword ptr [rsp + 32]
+    ; largest move (sim_grid_mt found their slots), and from the spawns after
+    ; the sorted slots, ascending
+    lea rax, band_win
+    mov ecx, dword ptr [rax + rbx*8]
+    mov edx, dword ptr [rax + rbx*8 + 4]
     mov dword ptr [rsp + 36], edx      ; the window's end
-    ; the old cell sizes first (from the last build's starts, still in the
-    ; counters): the pass below takes the leavers out of them
+    ; the old cell sizes first, from the last build's starts, into this
+    ; participant's scratch (its fz_buf, free until the separation): the
+    ; starts stay intact for the leavers' old cells, and the pass below takes
+    ; the leavers out of the sizes. r14: the counts, [r14 + cell * 4].
+    mov eax, dword ptr [rsp + 64]
+    shl rax, FZ_PART_SHIFT
+    mov r14, fz_buf
+    add r14, rax
+    mov rdx, r14
+    mov eax, r9d
+    shl rax, 2
+    sub r14, rax
     lea rdi, [rsi + r9*4 + 4]
     mov eax, BAND_CELLS / 8 - 1
 win_sizes:
     vmovdqu ymm0, ymmword ptr [rdi]
     vmovdqu ymm1, ymmword ptr [rdi + 4]
     vpsubd ymm1, ymm1, ymm0
-    vmovdqu ymmword ptr [rdi], ymm1
+    vmovdqu ymmword ptr [rdx], ymm1
     add rdi, 32
+    add rdx, 32
     dec eax
     jnz win_sizes
     vmovdqu ymm0, ymmword ptr [rdi]
@@ -308,10 +379,11 @@ win_sizes:
     vpbroadcastd ymm2, xmm2
     vpblendd ymm1, ymm1, ymm2, 0x80
     vpsubd ymm1, ymm1, ymm0
-    vmovdqu ymmword ptr [rdi], ymm1
-    ; one pass over the window, 8 slots per step: movers into the band (new
-    ; cell in it, not the old one) are listed; leavers (old cell in it, not
-    ; the new one) leave their old cell's count
+    vmovdqu ymmword ptr [rdx], ymm1
+    ; one pass over the window, 8 slots per step: movers into the band (cell
+    ; changed, bit 31, and the new one in the band) are listed; leavers
+    ; (changed, or dead, from the band's old slots) leave their old cell's
+    ; count (old_cell_of finds their old cells in the last build's starts).
     mov r8, sim_cell
     vmovd xmm5, r9d
     vpbroadcastd ymm5, xmm5            ; lo
@@ -328,21 +400,36 @@ collect_window:
         bzhi edx, edx, eax
     win_full:
     mov dword ptr [rsp + 20], edx      ; valid lanes
-    vmovdqu ymm0, ymmword ptr [r8 + rcx*4]         ; new cells
-    vmovdqu ymm1, ymmword ptr [r10 + rcx*4]        ; old cells
-    vpcmpeqd ymm2, ymm0, ymm1                      ; stayers
-    vpsubd ymm3, ymm0, ymm5
-    vpminud ymm0, ymm3, ymm4
-    vpcmpeqd ymm0, ymm0, ymm3                      ; new cell in the band
-    vpandn ymm0, ymm2, ymm0
-    vmovmskps eax, ymm0
-    and eax, edx
+    ; lanes in the band's old slots [old lo, old hi)
+    xor r10d, r10d
+    mov r13d, 8
+    mov eax, dword ptr [rsp + 16]
+    sub eax, ecx
+    cmovs eax, r10d
+    cmp eax, r13d
+    cmova eax, r13d
+    mov r11d, 255
+    bzhi r11d, r11d, eax
+    mov eax, dword ptr [rsp + 12]
+    sub eax, ecx
+    cmovs eax, r10d
+    cmp eax, r13d
+    cmova eax, r13d
+    mov r10d, 255
+    bzhi r10d, r10d, eax
+    andn r11d, r10d, r11d
+    and r11d, edx
+    vmovdqu ymm0, ymmword ptr [r8 + rcx*4]         ; cells; bit 31: changed (or dead: -1)
+    vmovmskps r10d, ymm0
+    vpand ymm1, ymm0, ymmword ptr k_abs
     vpsubd ymm3, ymm1, ymm5
     vpminud ymm1, ymm3, ymm4
-    vpcmpeqd ymm1, ymm1, ymm3                      ; old cell in the band
-    vpandn ymm1, ymm2, ymm1
-    vmovmskps edx, ymm1
-    and edx, dword ptr [rsp + 20]
+    vpcmpeqd ymm1, ymm1, ymm3                      ; cell in the band
+    vmovmskps eax, ymm1
+    and eax, r10d
+    and eax, edx                                   ; movers into the band
+    and r10d, r11d
+    mov edx, r10d                                  ; leavers
     test eax, eax
     jz win_no_movers
 win_mover:
@@ -359,9 +446,16 @@ win_no_movers:
 win_leaver:
     tzcnt r13d, edx
     blsr edx, edx
-    add r13d, ecx
-    mov r13d, dword ptr [r10 + r13*4]
-    dec dword ptr [rsi + r13*4 + 4]
+    push rcx
+    push rdx
+    add ecx, r13d                      ; the slot
+    mov edx, dword ptr [r8 + rcx*4]
+    and edx, 0x7FFFFFFF                ; its new cell
+    mov r11d, dword ptr [rsp + 16 + 16]
+    call old_cell_of
+    dec dword ptr [r14 + rax*4]
+    pop rdx
+    pop rcx
     test edx, edx
     jnz win_leaver
 win_next:
@@ -375,6 +469,7 @@ collect_tail:
     cmp ecx, edx
     jae collected_tail
     mov eax, dword ptr [r8 + rcx*4]
+    and eax, 0x7FFFFFFF
     mov r13d, eax
     sub r13d, r9d
     cmp r13d, BAND_CELLS
@@ -391,73 +486,19 @@ collected_tail:
     mov r15d, edi
     jmp counted_stay
 full_counts:
-    cmp grid_windowed, 0
-    jne window_counts
-    ; count stayers (new cell = old cell) and movers
+    ; count stayers (new cell = old cell) and movers, in the counters
+    lea r14, [rsi + 4]
     mov ecx, dword ptr [rsp + 12]
 count_stay:
     cmp ecx, dword ptr [rsp + 16]
     jae counted_stay
     mov edx, dword ptr [r8 + rcx*4]
-    cmp edx, dword ptr [r10 + rcx*4]
-    jne next_stay
+    test edx, edx
+    js next_stay                       ; changed cell, or dead
     inc dword ptr [rsi + rdx*4 + 4]
 next_stay:
     inc ecx
     jmp count_stay
-    jmp counted_stay
-window_counts:
-    ; stayers per cell = the cell's old size (from the last build's starts,
-    ; still in the counters) minus the old slots that left it (movers, dead)
-    lea rdi, [rsi + r9*4 + 4]          ; arr[lo + 1]: start of cell lo
-    mov ecx, BAND_CELLS / 8 - 1
-old_sizes:
-    vmovdqu ymm0, ymmword ptr [rdi]
-    vmovdqu ymm1, ymmword ptr [rdi + 4]
-    vpsubd ymm1, ymm1, ymm0
-    vmovdqu ymmword ptr [rdi], ymm1
-    add rdi, 32
-    dec ecx
-    jnz old_sizes
-    ; the band's last block: the last cell ends at the old range's end (the next
-    ; counter belongs to the next band)
-    vmovdqu ymm0, ymmword ptr [rdi]
-    vmovdqu ymm1, ymmword ptr [rdi + 4]
-    vmovd xmm2, dword ptr [rsp + 16]
-    vpbroadcastd ymm2, xmm2
-    vpblendd ymm1, ymm1, ymm2, 0x80
-    vpsubd ymm1, ymm1, ymm0
-    vmovdqu ymmword ptr [rdi], ymm1
-    mov ecx, dword ptr [rsp + 12]
-leavers:
-    mov edx, dword ptr [rsp + 16]
-    sub edx, ecx
-    jbe counted_stay
-    vmovdqu ymm0, ymmword ptr [r8 + rcx*4]
-    vpcmpeqd ymm0, ymm0, ymmword ptr [r10 + rcx*4]
-    vmovmskps eax, ymm0
-    not eax
-    mov r11d, 255
-    cmp edx, 8
-    jae leavers_full
-        mov r11d, edx
-        bzhi r11d, eax, r11d           ; only the lanes before the range's end
-        mov eax, r11d
-        jmp leaving
-    leavers_full:
-    and eax, r11d
-leaving:
-    test eax, eax
-    jz leavers_next
-    tzcnt edx, eax
-    blsr eax, eax
-    lea r11d, [rcx + rdx]
-    mov r11d, dword ptr [r10 + r11*4]  ; its old cell
-    dec dword ptr [rsi + r11*4 + 4]
-    jmp leaving
-leavers_next:
-    add ecx, 8
-    jmp leavers
 counted_stay:
     vzeroupper
     xor ecx, ecx
@@ -466,7 +507,8 @@ count_move:
     jae counted_move
     mov eax, dword ptr [rbp + rcx*4]
     mov edx, dword ptr [r8 + rax*4]
-    inc dword ptr [rsi + rdx*4 + 4]
+    and edx, 0x7FFFFFFF
+    inc dword ptr [r14 + rdx*4]
     inc ecx
     jmp count_move
 counted_move:
@@ -480,6 +522,7 @@ counted_move:
     vmovdqa ymm5, ymmword ptr k_bcast3
     vmovdqa ymm3, ymmword ptr k_upper_half
     xor eax, eax
+    lea r11, [r14 + r9*4]              ; (windowed: the counts in the scratch)
     cmp grid_windowed, 0
     jne prefix_excl
 prefix:
@@ -500,7 +543,7 @@ prefix:
     jmp prefixed
 prefix_excl:
     ; (windowed: exclusive, the cells' starts directly)
-    vmovdqu ymm0, ymmword ptr [rdi + rax*4]
+    vmovdqu ymm0, ymmword ptr [r11 + rax*4]
     vpslldq ymm2, ymm0, 4
     vpaddd ymm0, ymm0, ymm2
     vpslldq ymm2, ymm0, 8
@@ -509,7 +552,7 @@ prefix_excl:
     vpand ymm2, ymm2, ymm3
     vpaddd ymm0, ymm0, ymm2
     vpaddd ymm0, ymm0, ymm1
-    vpsubd ymm2, ymm0, ymmword ptr [rdi + rax*4]   ; minus the counts: the starts
+    vpsubd ymm2, ymm0, ymmword ptr [r11 + rax*4]   ; minus the counts: the starts
     vmovdqu ymmword ptr [rdi + rax*4], ymm2
     vpermd ymm1, ymm4, ymm0
     add eax, 8
@@ -543,6 +586,7 @@ few_keys:
     mov eax, dword ptr [rbp + rcx*4]
     mov dword ptr [r13 + rcx*4], eax
     mov edx, dword ptr [r8 + rax*4]
+    and edx, 0x7FFFFFFF
     shl rdx, 32
     mov eax, dword ptr [r11 + rax*4]
     or rdx, rax
@@ -565,6 +609,7 @@ mcount:
     jae mcounted
     mov eax, dword ptr [rbp + rcx*4]
     mov edx, dword ptr [r8 + rax*4]
+    and edx, 0x7FFFFFFF
     inc dword ptr [r11 + rdx*4]
     inc ecx
     jmp mcount
@@ -587,6 +632,7 @@ mplace:
     jae mplaced
     mov eax, dword ptr [rbp + rcx*4]   ; storage index
     mov edx, dword ptr [r8 + rax*4]    ; cell
+    and edx, 0x7FFFFFFF
     mov edi, dword ptr [r11 + rdx*4]
     inc dword ptr [r11 + rdx*4]
     mov dword ptr [r13 + rdi*4], eax
@@ -624,7 +670,6 @@ mput:
     jmp msort
 msorted:
     ; C. merge the old range's stayers with the sorted movers
-    mov r10, sim_slot_cell
     mov ebx, dword ptr [rsp]           ; w: the next output slot
     mov r12d, dword ptr [rsp + 12]     ; i: the old block
     xor edx, edx                       ; k: the next mover
@@ -639,8 +684,8 @@ merge_blocks:
     jbe merge_tail
     ; stayers of the block: new cell = old cell, lanes before the old range's end
     vmovdqu ymm0, ymmword ptr [r8 + r12*4]
-    vpcmpeqd ymm1, ymm0, ymmword ptr [r10 + r12*4]
-    vmovmskps edi, ymm1
+    vmovmskps edi, ymm0
+    xor edi, 255                       ; bit 31 clear: kept its cell
     cmp eax, 8
     jae merge_full
         bzhi edi, edi, eax
@@ -702,8 +747,6 @@ piece:
     vmovdqu ymm1, ymmword ptr [r11 + r12*4]
     mov r11, sim_seq2
     vmovdqu ymmword ptr [r11 + rbx*4], ymm1
-    mov r11, sim_slot_cell2
-    vmovdqu ymmword ptr [r11 + rbx*4], ymm0
     add ebx, 8
     jmp merge_next
 piece_pack:
@@ -748,9 +791,6 @@ piece_pack:
     vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
     mov r11, sim_seq2
     vmovdqu ymmword ptr [r11 + rbx*4], ymm1
-    vpermd ymm1, ymm3, ymm0
-    mov r11, sim_slot_cell2
-    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
     jmp piece_stored
 piece_masked:
     shl ecx, 5
@@ -779,9 +819,6 @@ piece_masked:
     mov r11, sim_seq
     vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
     mov r11, sim_seq2
-    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
-    vpermd ymm1, ymm3, ymm0
-    mov r11, sim_slot_cell2
     vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
 piece_stored:
     add ebx, dword ptr [rsp + 44]
@@ -829,8 +866,8 @@ place_stay:
     jbe placed_stay
     dec ecx
     mov edx, dword ptr [r8 + rcx*4]
-    cmp edx, dword ptr [r10 + rcx*4]
-    jne place_stay
+    test edx, edx
+    js place_stay                      ; changed cell, or dead
     mov eax, dword ptr [rsi + rdx*4 + 4]
     dec eax
     mov dword ptr [rsi + rdx*4 + 4], eax
@@ -845,6 +882,7 @@ place_move:
     jae placed_move
     mov edi, dword ptr [rbp + rcx*4]
     mov edx, dword ptr [r8 + rdi*4]
+    and edx, 0x7FFFFFFF
     mov eax, dword ptr [rsi + rdx*4 + 4]
     dec eax
     mov dword ptr [rsi + rdx*4 + 4], eax
@@ -1136,10 +1174,6 @@ merge_emit_mover: proc() = {
     vmovd xmm0, dword ptr [r11 + rcx*4]
     mov r11, sim_seq2
     vmovd dword ptr [r11 + rbx*4], xmm0
-    mov rax, rsi
-    shr rax, 32
-    mov r11, sim_slot_cell2
-    mov dword ptr [r11 + rbx*4], eax
     inc ebx
     inc edx
     mov dword ptr [rsp + 48], edx
@@ -1259,8 +1293,6 @@ out_tab:
     jb out_tab
     mov rax, sim_cell2
     mov fz_cell, rax
-    mov rax, sim_slot_cell2
-    mov fz_slot_cell, rax
     ; rows anyone can have moved since the last build (a cell is 2 m)
     vmovd xmm0, grid_maxdisp
     vmulss xmm0, xmm0, k_disp_rows
@@ -1419,6 +1451,50 @@ mchunks_done:
     add grid_stage_cyc[8], rcx
     mov qword ptr [rsp + 24], rax
 bands_ready:
+    ; each band's old slots and its window's, from the last build's cell
+    ; starts (arr[c + 1]: the start of cell c; arr[GRID_CELLS + 1]: their
+    ; end), before the band jobs turn them into this build's
+    mov r8, sim_cell_arr
+    lea r9, band_old_lo
+    lea r10, band_win
+    xor ecx, ecx
+    cmp grid_built_n, 0
+    jne old_ranges
+zero_ranges:
+    mov dword ptr [r9 + rcx*4], 0      ; nothing in grid order yet
+    inc ecx
+    cmp ecx, GRID_BANDS + 1
+    jb zero_ranges
+    jmp ranges_done
+old_ranges:
+    mov eax, ecx
+    shl eax, BAND_SHIFT
+    mov edx, dword ptr [r8 + rax*4 + 4]
+    mov dword ptr [r9 + rcx*4], edx
+    mov eax, ecx
+    shl eax, 3                         ; the band's first row
+    mov edx, eax
+    sub eax, grid_d_rows
+    xor r11d, r11d
+    test eax, eax
+    cmovs eax, r11d
+    add edx, BAND_ROWS
+    add edx, grid_d_rows
+    mov r11d, GRID_DIM
+    cmp edx, r11d
+    cmova edx, r11d
+    shl eax, GRID_SHIFT
+    shl edx, GRID_SHIFT
+    mov eax, dword ptr [r8 + rax*4 + 4]
+    mov edx, dword ptr [r8 + rdx*4 + 4]
+    mov dword ptr [r10 + rcx*8], eax
+    mov dword ptr [r10 + rcx*8 + 4], edx
+    inc ecx
+    cmp ecx, GRID_BANDS
+    jb old_ranges
+    mov eax, grid_built_n
+    mov dword ptr [r9 + GRID_BANDS * 4], eax
+ranges_done:
     mov fz_inplace, 0
     cmp grid_live, FZ_INPLACE_MIN
     jb inplace_decided
@@ -1479,10 +1555,6 @@ inplace_decided:
     mov rcx, sim_seq2
     mov sim_seq, rcx
     mov sim_seq2, rax
-    mov rax, sim_slot_cell
-    mov rcx, sim_slot_cell2
-    mov sim_slot_cell, rcx
-    mov sim_slot_cell2, rax
     cmp grid_fuse, 0
     je unfused
     cmp grid_fuse_now, 0
