@@ -53,9 +53,13 @@ spawn:
     invoke(CreateThread, 0, 262144, pool_worker&, rsi, 0, 0)
     lea rcx, pool_handles
     mov qword ptr [rcx + rsi*8], rax
+    ; above normal: a phase waits for its slowest participant, and a worker
+    ; preempted by another process mid-chunk holds everyone up
+    invoke(SetThreadPriority, rax, 1)
     inc esi
     jmp spawn
 spawned:
+    invoke(SetThreadPriority, -2, 1)   ; (-2: the current thread)
     add rsp, 56
     pop rsi
     pop rbx
