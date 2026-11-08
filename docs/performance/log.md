@@ -542,9 +542,14 @@ resize then released null pointers and crashed on start on this laptop.
 Measured and discarded:
 - Fusing the dense crowd with 8-row bands (up to 1/16 of everyone per band,
   bands handed out largest first): level.
-- Mover and leaver lists built by the integration instead of the window scan:
-  the build saved ~3 M cycles per tick, the integration spent as much (~74k
-  movers per tick at 1M, writing records into cold list memory); 16T +3%.
+- Mover and leaver lists built by the integration instead of the window scan
+  (leavers found in the band's and its neighbours' mover lists by old cell):
+  the build saved ~3 M cycles per tick at 1M, the integration spent as much
+  (~74k movers per tick). Isolated: the per-band flush costs ~2%, packing the
+  records ~12% of the integration (~56 cycles per group with a mover, scalar
+  or with vector left-packing alike); 16T +3%. Discarded. They were also the
+  way to an in-place merge (no read-for-ownership of the output columns,
+  ~20 B per entity), which needs the neighbours' old rows no longer read.
 - Integer compare for `d2 < 1` (off the FP add pipes): level; the candidate
   loop waits on its in-order sums.
 - A higher threshold for the merge's insertion sort, skipping all-stayer
