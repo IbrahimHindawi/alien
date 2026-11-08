@@ -99,31 +99,66 @@ done:
     ret
 }
 
-; ecx, edx: slots; r8d: participant. Its buffer's rows into the pending
-; columns: a boundary job still reads their start positions.
+; ecx, edx: slots; r8d: participant. Rows a boundary job still reads the
+; start positions of: nothing to keep. Their new velocities are home already
+; (no separation reads velocities), and the new position is
+; clamp(start + velocity * dt): fz_rows_pend computes it again, the same
+; operations in the same order, when the rows' last neighbour is separated.
 fz_rows_stash: proc() = {
-    cmp fz_inplace, 0
-    je done
-    lea rax, fz_out_tab
-    shl r8d, 4
-    mov r9, qword ptr [rax + r8 + 8]
-    mov r8, qword ptr [rax + r8]
-    mov r10, fz_pend_x
-    mov r11, fz_pend_z
-    call fz_copy
-done:
     ret
 }
 
-; ecx, edx: slots. Pending rows home.
+; ecx, edx: slots. Pending rows home: position = clamp(position + velocity *
+; dt), as the integration computed it (bit for bit: the same packed or scalar
+; operations, each exactly rounded). Clobbers rax, rcx, rdx, r8 - r11, ymm0 - 3.
 fz_rows_pend: proc() = {
     cmp fz_inplace, 0
     je done
-    mov r8, fz_pend_x
-    mov r9, fz_pend_z
-    mov r10, fz_src_x
-    mov r11, fz_src_z
-    call fz_copy
+    mov r8, fz_src_x
+    mov r9, fz_src_z
+    mov r10, fz_vel_x
+    mov r11, fz_vel_z
+    mov eax, ecx
+    sub edx, ecx
+    jbe done
+eight:
+    cmp edx, 8
+    jb ones
+    vmovups ymm0, ymmword ptr [r10 + rax*4]
+    vmulps ymm0, ymm0, ymmword ptr k_dt
+    vaddps ymm0, ymm0, ymmword ptr [r8 + rax*4]
+    vmaxps ymm0, ymm0, ymmword ptr k_lo
+    vminps ymm0, ymm0, ymmword ptr k_hi
+    vmovups ymmword ptr [r8 + rax*4], ymm0
+    vmovups ymm1, ymmword ptr [r11 + rax*4]
+    vmulps ymm1, ymm1, ymmword ptr k_dt
+    vaddps ymm1, ymm1, ymmword ptr [r9 + rax*4]
+    vmaxps ymm1, ymm1, ymmword ptr k_lo
+    vminps ymm1, ymm1, ymmword ptr k_hi
+    vmovups ymmword ptr [r9 + rax*4], ymm1
+    add eax, 8
+    sub edx, 8
+    jmp eight
+ones:
+    test edx, edx
+    jz flushed
+    vmovss xmm0, dword ptr [r10 + rax*4]
+    vmulss xmm0, xmm0, dword ptr k_dt
+    vaddss xmm0, xmm0, dword ptr [r8 + rax*4]
+    vmaxss xmm0, xmm0, dword ptr k_lo
+    vminss xmm0, xmm0, dword ptr k_hi
+    vmovss dword ptr [r8 + rax*4], xmm0
+    vmovss xmm1, dword ptr [r11 + rax*4]
+    vmulss xmm1, xmm1, dword ptr k_dt
+    vaddss xmm1, xmm1, dword ptr [r9 + rax*4]
+    vmaxss xmm1, xmm1, dword ptr k_lo
+    vminss xmm1, xmm1, dword ptr k_hi
+    vmovss dword ptr [r9 + rax*4], xmm1
+    inc eax
+    dec edx
+    jmp ones
+flushed:
+    vzeroupper
 done:
     ret
 }
