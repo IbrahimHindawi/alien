@@ -1346,7 +1346,13 @@ grid_band_job_timed: proc(begin: u32, end: u32, band: u32) = {
     or rax, rdx
     mov rbx, rax
     mov rdx, r10
+    cmp grid_local, 0
+    jne timed_local
     call grid_band_job
+    jmp timed_done
+timed_local:
+    call grid_band_local
+timed_done:
     rdtsc
     shl rdx, 32
     or rax, rdx
@@ -1390,16 +1396,28 @@ sim_grid_mt: proc() = {
     mov rdx, sim_pos3_z
     mov fz_pend_x, rax
     mov fz_pend_z, rdx
+    mov r9, sim_seq2
+    mov fz_seq, r9
     lea rcx, fz_out_tab
     xor r8d, r8d
 out_tab:
     mov qword ptr [rcx + r8], rax
     mov qword ptr [rcx + r8 + 8], rdx
-    add r8d, 16
-    cmp r8d, 64 * 16
+    mov r9, fz_src_x
+    mov qword ptr [rcx + r8 + 16], r9
+    mov r9, fz_src_z
+    mov qword ptr [rcx + r8 + 24], r9
+    mov r9, fz_vel_x
+    mov qword ptr [rcx + r8 + 32], r9
+    mov r9, fz_vel_z
+    mov qword ptr [rcx + r8 + 40], r9
+    mov r9, fz_seq
+    mov qword ptr [rcx + r8 + 48], r9
+    mov r9, sim_cell_start
+    mov qword ptr [rcx + r8 + 56], r9
+    add r8d, 64
+    cmp r8d, 64 * 64
     jb out_tab
-    mov rax, sim_seq2
-    mov fz_seq, rax
     ; rows anyone can have moved since the last build (a cell is 2 m)
     vmovd xmm0, grid_maxdisp
     vmulss xmm0, xmm0, k_disp_rows
@@ -1558,6 +1576,45 @@ mchunks_done:
     add grid_stage_cyc[8], rcx
     mov qword ptr [rsp + 24], rax
 bands_ready:
+    ; the local build (grid_local.rasm) for bandwidth-bound ticks: windowed
+    ; and fused, a large population, 8 to LB_PARTS participants, and no band
+    ; too full for the participants' buffers
+    mov grid_local, 0
+    cmp grid_windowed, 0
+    je local_decided
+    cmp grid_fuse_now, 0
+    je local_decided
+    cmp grid_live, FZ_INPLACE_MIN
+    jb local_decided
+    mov eax, pool_parts
+    cmp eax, 8
+    jb local_decided
+    cmp eax, LB_PARTS
+    ja local_decided
+    lea r9, band_total
+    xor ecx, ecx
+local_bands:
+    cmp dword ptr [r9 + rcx*4], LB_BAND_MAX
+    ja local_decided
+    inc ecx
+    cmp ecx, GRID_BANDS
+    jb local_bands
+    mov grid_local, 1
+    ; each row's first slot in the last build
+    mov r8, sim_cell_arr
+    lea r9, lb_row_old
+    xor ecx, ecx
+local_rows:
+    mov eax, ecx
+    shl eax, GRID_SHIFT
+    mov eax, dword ptr [r8 + rax*4 + 4]
+    mov dword ptr [r9 + rcx*4], eax
+    inc ecx
+    cmp ecx, GRID_DIM
+    jb local_rows
+    mov eax, grid_built_n
+    mov dword ptr [r9 + GRID_DIM * 4], eax
+local_decided:
     ; each band's old slots and its window's, from the last build's cell
     ; starts (arr[c + 1]: the start of cell c; arr[GRID_CELLS + 1]: their
     ; end), before the band jobs turn them into this build's
@@ -1632,6 +1689,17 @@ inplace_decided:
     mov sim_count, eax
     mov sim_alive, eax
     mov grid_built_n, eax
+    ; (a local build wrote this build's starts to the other array)
+    cmp grid_local, 0
+    je starts_kept
+    mov rax, sim_cell_arr
+    mov rcx, sim_cell_arr2
+    mov sim_cell_arr, rcx
+    mov sim_cell_arr2, rax
+    lea rax, [rcx + 4]
+    mov sim_cell_start, rax
+    mov dword ptr [rcx], 0
+starts_kept:
     ; the end of the last cell
     mov rax, sim_cell_arr
     mov edx, sim_count
@@ -1664,6 +1732,8 @@ inplace_decided:
     je by_slots
     ; (every boundary was claimed by one of its two bands; in place, every
     ; row's integrated positions are home in the live columns)
+    cmp grid_local, 0
+    jne cells_swap                     ; (local: the integrated positions are out)
     cmp fz_inplace, 0
     jne cells_swap
     jmp positions_swap

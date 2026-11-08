@@ -228,6 +228,14 @@ sim_alloc: proc() -> b32 = {
     mov sim_cell_arr, rax
     add rax, 4
     mov sim_cell_start, rax
+    invoke(arena_push, arena_perm&, (GRID_CELLS + 8) * 4)
+    test rax, rax
+    jz failed
+    mov sim_cell_arr2, rax
+    invoke(arena_push, arena_perm&, LB_PARTS << LB_PART_SHIFT)
+    test rax, rax
+    jz failed
+    mov lb_buf, rax
     ; the identity view of ids: storage is in grid order, so slot = id
     mov rax, sim_identity
     xor ecx, ecx

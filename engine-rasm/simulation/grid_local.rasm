@@ -1,0 +1,854 @@
+; simulation/grid_local.rasm: the band build for bandwidth-bound ticks
+;
+; With many threads and a large population the tick waits on memory, and the
+; windowed band build (grid_mt.rasm) pays for every output line twice: the
+; core reads each line of the spare columns before writing it, and the rows
+; beside a band boundary are separated later by another job, from memory.
+; Here each band job instead rebuilds its rows and one row either side (its
+; region) into this participant's buffer, which stays in cache:
+;
+;   sizes    the region's old cell sizes, from the last build's starts
+;            (sim_cell_arr stays intact: this build's starts go to
+;            sim_cell_arr2, so every job can read the old ones)
+;   collect  one pass over the region's rows widened by the largest move:
+;            movers into the region listed, leavers out of their old cells
+;   prefix   the region's cell starts in the buffer
+;   merge    the region's stayers with its sorted movers, into the buffer
+;   starts   the band's cells' global starts (from the band's base)
+;   separate the band's own rows, every neighbour row in the buffer, and
+;            integrate them (sim_separate_v4 on the participant's columns)
+;   out      the band's rows to the spare columns with streaming stores:
+;            whole lines, never read first
+;
+; No boundary jobs, no rows waiting, no claims. The region's two extra rows
+; are built twice (once by each band beside them); sim_grid_mt takes this
+; path only for large populations on 8 or more threads, where memory is the
+; bottleneck and that work is cheaper than the traffic it saves.
+
+; the participant's buffer: seven columns (x, z, vx, vz, seq; the integrated
+; x, z), the region's cell starts and sizes, the many-movers counts, the
+; movers' (slot, cell) pairs, and the sort's ids and keys
+#define LB_CAP 65536
+#define LB_COL_BYTES 262208
+#define LB_CELLS_BYTES 24640
+#define LB_OX_OFF 1311040
+#define LB_OZ_OFF 1573248
+#define LB_STARTS_OFF 1835456
+#define LB_SIZES_OFF 1860096
+#define LB_MCOUNT_OFF 1884736
+#define LB_PAIRS_OFF 1909376
+#define LB_S_OFF 2433664
+#define LB_K_OFF 2695808
+#define LB_PART_SHIFT 22
+; at most this many entities in a band for the local build (a region holds three)
+#define LB_BAND_MAX 20000
+#define LB_PARTS 32
+
+lb_buf: *u8 = 0                         ; LB_PARTS << LB_PART_SHIFT bytes (sim_alloc)
+lb_row_old: [1025]u32 = {}              ; each row's first slot in the last build ([1024]: their end)
+grid_local: u32 = 0                     ; this build is local (see above)
+sim_cell_arr2: *u32 = 0                 ; the other cell starts (GRID_CELLS + 8)
+
+; ecx: a slot among the region's old slots, edx: its new cell (any value for
+; the dead), r9d: the region's first cell, r10d: its cells, r11d: the end of
+; its old slots, rsi: the last build's starts -> eax: the slot's old cell
+; (old_cell_of, for a region). Clobbers rdx, r10.
+old_cell_of_r: proc() = {
+    push rbx
+    push rdi
+    push r8
+    mov r8d, r10d
+    lea rbx, k_cell_near
+    xor edi, edi
+near:
+    mov eax, edx
+    add eax, dword ptr [rbx + rdi*4]
+    mov r10d, eax
+    sub r10d, r9d
+    cmp r10d, r8d
+    jae next_near
+    cmp dword ptr [rsi + rax*4 + 4], ecx
+    ja next_near
+    inc r10d
+    cmp r10d, r8d
+    je last_cell                       ; the region's last cell
+    cmp dword ptr [rsi + rax*4 + 8], ecx
+    ja found
+    jmp next_near
+last_cell:
+    cmp r11d, ecx
+    ja found
+next_near:
+    inc edi
+    cmp edi, 8
+    jb near
+    mov eax, r9d
+    lea r10d, [r9 + r8]
+search:
+    mov edi, r10d
+    sub edi, eax
+    cmp edi, 1
+    jbe found
+    shr edi, 1
+    add edi, eax
+    cmp dword ptr [rsi + rdi*4 + 4], ecx
+    ja search_left
+    mov eax, edi
+    jmp search
+search_left:
+    mov r10d, edi
+    jmp search
+found:
+    pop r8
+    pop rdi
+    pop rbx
+    ret
+}
+
+; Inside grid_band_local's merge (its frame: k at [rsp + 8 + 40], the
+; output columns at [rsp + 8 + 104 ..]): emit mover k at w (rbx), take the
+; next one's key into rsi.
+lb_emit_mover: proc() = {
+    mov edx, dword ptr [rsp + 48]
+    mov ecx, dword ptr [r13 + rdx*4]   ; storage index
+    mov r11, sim_pos_x
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, qword ptr [rsp + 112]
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_pos_z
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, qword ptr [rsp + 120]
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_vel_x
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, qword ptr [rsp + 128]
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_vel_z
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, qword ptr [rsp + 136]
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    mov r11, sim_seq
+    vmovd xmm0, dword ptr [r11 + rcx*4]
+    mov r11, qword ptr [rsp + 144]
+    vmovd dword ptr [r11 + rbx*4], xmm0
+    inc ebx
+    inc edx
+    mov dword ptr [rsp + 48], edx
+    mov rsi, MERGE_NONE
+    cmp edx, r15d
+    jae done
+    mov rsi, qword ptr [r14 + rdx*8]
+done:
+    ret
+}
+
+; rsi: source, rdi: destination (u32 columns), ecx: count. Streaming stores
+; for whole aligned vectors, plain ones at the ends. Clobbers rax, rcx.
+lb_copy_nt: proc() = {
+    test ecx, ecx
+    jz done
+head:
+    test rdi, 31
+    jz body
+    mov eax, dword ptr [rsi]
+    mov dword ptr [rdi], eax
+    add rsi, 4
+    add rdi, 4
+    dec ecx
+    jnz head
+    jmp done
+body:
+    cmp ecx, 8
+    jb tail
+    vmovups ymm0, ymmword ptr [rsi]
+    vmovntps ymmword ptr [rdi], ymm0
+    add rsi, 32
+    add rdi, 32
+    sub ecx, 8
+    jmp body
+tail:
+    test ecx, ecx
+    jz flushed
+    mov eax, dword ptr [rsi]
+    mov dword ptr [rdi], eax
+    add rsi, 4
+    add rdi, 4
+    dec ecx
+    jmp tail
+flushed:
+    vzeroupper
+done:
+    ret
+}
+
+; r8d: band, r9d: participant. The band's rows in grid order, separated and
+; integrated, into the spare columns.
+grid_band_local: proc(begin: u32, end: u32, band: u32) = {
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    push rbp
+    sub rsp, 168                       ; [rsp] base, [+4] n, [+8] the region's entities, [+12] its old lo, [+16] old hi, [+20] lanes, [+24] its first cell, [+28] its cells, [+36] the window's end, [+40..63] the merge's state, [+64] participant, [+72] a block's cells, [+104..+144] the buffer's x, z, vx, vz, seq, [+152] the buffer, [+160] band, [+164] the band's first cell
+    mov dword ptr [rsp + 64], r9d
+    mov dword ptr [rsp + 160], r8d
+    mov ebx, r8d
+    ; this participant's buffer and its columns
+    mov eax, r9d
+    shl rax, LB_PART_SHIFT
+    mov r10, lb_buf
+    add rax, r10
+    mov qword ptr [rsp + 152], rax
+    mov qword ptr [rsp + 104], rax
+    add rax, LB_COL_BYTES
+    mov qword ptr [rsp + 112], rax
+    add rax, LB_COL_BYTES
+    mov qword ptr [rsp + 120], rax
+    add rax, LB_COL_BYTES
+    mov qword ptr [rsp + 128], rax
+    add rax, LB_COL_BYTES
+    mov qword ptr [rsp + 136], rax
+    mov eax, ebx
+    shl eax, BAND_SHIFT
+    mov dword ptr [rsp + 164], eax
+    lea rax, band_offset
+    mov eax, dword ptr [rax + rbx*4]
+    mov dword ptr [rsp], eax
+    lea rax, band_total
+    mov eax, dword ptr [rax + rbx*4]
+    mov dword ptr [rsp + 4], eax
+    ; the region: the band's rows and one either side, clamped; its old slots
+    mov eax, ebx
+    shl eax, BAND_ROW_SHIFT
+    lea ecx, [rax - 1]
+    xor edx, edx
+    test ecx, ecx
+    cmovs ecx, edx                     ; first row
+    lea edx, [rax + BAND_ROWS + 1]
+    mov r10d, GRID_DIM
+    cmp edx, r10d
+    cmova edx, r10d                    ; end row
+    lea r10, lb_row_old
+    mov eax, dword ptr [r10 + rcx*4]
+    mov dword ptr [rsp + 12], eax
+    mov eax, dword ptr [r10 + rdx*4]
+    mov dword ptr [rsp + 16], eax
+    mov r9d, ecx
+    shl r9d, GRID_SHIFT
+    mov dword ptr [rsp + 24], r9d
+    mov eax, edx
+    sub eax, ecx
+    shl eax, GRID_SHIFT
+    mov dword ptr [rsp + 28], eax
+    ; the window: the region's rows widened by the largest move
+    sub ecx, grid_d_rows
+    xor eax, eax
+    test ecx, ecx
+    cmovs ecx, eax
+    add edx, grid_d_rows
+    mov eax, GRID_DIM
+    cmp edx, eax
+    cmova edx, eax
+    mov eax, dword ptr [r10 + rdx*4]
+    mov dword ptr [rsp + 36], eax
+    mov ecx, dword ptr [r10 + rcx*4]   ; (the window's start, for the collect)
+    ; the region's old cell sizes, from the last build's starts, into the
+    ; buffer's sizes; r14: [r14 + cell * 4]
+    mov rsi, sim_cell_arr
+    mov rdx, qword ptr [rsp + 152]
+    add rdx, LB_SIZES_OFF
+    mov r14, rdx
+    mov eax, r9d
+    shl rax, 2
+    sub r14, rax
+    lea rdi, [rsi + r9*4 + 4]
+    mov eax, dword ptr [rsp + 28]
+    shr eax, 3
+sizes:
+    vmovdqu ymm0, ymmword ptr [rdi]
+    vmovdqu ymm1, ymmword ptr [rdi + 4]
+    vpsubd ymm1, ymm1, ymm0
+    vmovdqu ymmword ptr [rdx], ymm1
+    add rdi, 32
+    add rdx, 32
+    dec eax
+    jnz sizes
+    ; one pass over the window: movers into the region (changed cell, not
+    ; dead, the new cell in the region) listed with their cells; leavers
+    ; (changed or dead, from the region's old slots) out of their old cells
+    mov rbp, qword ptr [rsp + 152]
+    add rbp, LB_PAIRS_OFF
+    mov r8, sim_seq
+    vmovd xmm5, r9d
+    vpbroadcastd ymm5, xmm5
+    mov eax, dword ptr [rsp + 28]
+    dec eax
+    vmovd xmm4, eax
+    vpbroadcastd ymm4, xmm4            ; the region's cells - 1
+    xor edi, edi
+collect:
+    mov eax, dword ptr [rsp + 36]
+    sub eax, ecx
+    jbe collected
+    mov edx, 255
+    cmp eax, 8
+    jae full
+        bzhi edx, edx, eax
+    full:
+    mov dword ptr [rsp + 20], edx
+    vmovdqu ymm0, ymmword ptr [r8 + rcx*4]
+    vmovmskps r10d, ymm0                           ; changed cell
+    vpslld ymm0, ymm0, 1
+    vmovmskps r13d, ymm0                           ; dead
+    mov r11d, edx
+    mov eax, ecx
+    cmp eax, dword ptr [rsp + 12]
+    jb range_below
+    add eax, 8
+    cmp eax, dword ptr [rsp + 16]
+    jbe range_done
+    cmp ecx, dword ptr [rsp + 16]
+    jb range_edge
+    xor r11d, r11d
+    jmp range_done
+range_below:
+    add eax, 8
+    cmp eax, dword ptr [rsp + 12]
+    ja range_edge
+    xor r11d, r11d
+    jmp range_done
+range_edge:
+    mov eax, dword ptr [rsp + 16]
+    sub eax, ecx
+    jns hi_pos
+    xor eax, eax
+    hi_pos:
+    cmp eax, 8
+    jbe hi_in
+    mov eax, 8
+    hi_in:
+    mov r11d, 255
+    bzhi r11d, r11d, eax
+    mov eax, dword ptr [rsp + 12]
+    sub eax, ecx
+    jns lo_pos
+    xor eax, eax
+    lo_pos:
+    cmp eax, 8
+    jbe lo_in
+    mov eax, 8
+    lo_in:
+    mov edx, 255
+    bzhi edx, edx, eax
+    andn r11d, edx, r11d
+    mov edx, dword ptr [rsp + 20]
+    and r11d, edx
+range_done:
+    mov rax, sim_pos_x
+    vmovups ymm1, ymmword ptr [rax + rcx*4]
+    vaddps ymm1, ymm1, ymmword ptr k_world_half
+    vmulps ymm1, ymm1, ymmword ptr k_inv_cell
+    vcvttps2dq ymm1, ymm1
+    mov rax, sim_pos_z
+    vmovups ymm2, ymmword ptr [rax + rcx*4]
+    vaddps ymm2, ymm2, ymmword ptr k_world_half
+    vmulps ymm2, ymm2, ymmword ptr k_inv_cell
+    vcvttps2dq ymm2, ymm2
+    vpslld ymm2, ymm2, GRID_SHIFT
+    vpaddd ymm1, ymm1, ymm2                        ; cells
+    vmovdqu ymmword ptr [rsp + 72], ymm1
+    vpsubd ymm3, ymm1, ymm5
+    vpminud ymm1, ymm3, ymm4
+    vpcmpeqd ymm1, ymm1, ymm3                      ; in the region
+    vmovmskps eax, ymm1
+    and eax, r10d
+    andn eax, r13d, eax
+    and eax, edx                                   ; movers into the region
+    or r10d, r13d
+    and r10d, r11d
+    mov edx, r10d                                  ; leavers
+    test eax, eax
+    jz no_movers
+mover:
+    tzcnt r13d, eax
+    blsr eax, eax
+    mov r10d, dword ptr [rsp + r13*4 + 72]
+    add r13d, ecx
+    mov dword ptr [rbp + rdi*8], r13d
+    mov dword ptr [rbp + rdi*8 + 4], r10d
+    inc edi
+    test eax, eax
+    jnz mover
+no_movers:
+    test edx, edx
+    jz next_block
+leaver:
+    tzcnt r13d, edx
+    blsr edx, edx
+    push rcx
+    push rdx
+    mov edx, dword ptr [rsp + r13*4 + 72 + 16]
+    add ecx, r13d
+    mov r11d, dword ptr [rsp + 16 + 16]
+    mov r10d, dword ptr [rsp + 28 + 16]
+    call old_cell_of_r
+    dec dword ptr [r14 + rax*4]
+    pop rdx
+    pop rcx
+    test edx, edx
+    jnz leaver
+next_block:
+    add ecx, 8
+    jmp collect
+collected:
+    vzeroupper
+    ; the spawns since the last build, in the region
+    mov ecx, grid_built_n
+    mov edx, grid_old_count
+tail:
+    cmp ecx, edx
+    jae tailed
+    test dword ptr [r8 + rcx*4], 0x40000000
+    jnz next_tail
+    push rdx
+    call cell_of_slot
+    pop rdx
+    mov r13d, eax
+    sub r13d, r9d
+    cmp r13d, dword ptr [rsp + 28]
+    jae next_tail
+    mov dword ptr [rbp + rdi*8], ecx
+    mov dword ptr [rbp + rdi*8 + 4], eax
+    inc edi
+next_tail:
+    inc ecx
+    jmp tail
+tailed:
+    mov r15d, edi                      ; the movers
+    xor ecx, ecx
+count_movers:
+    cmp ecx, r15d
+    jae counted
+    mov eax, dword ptr [rbp + rcx*8 + 4]
+    inc dword ptr [r14 + rax*4]
+    inc ecx
+    jmp count_movers
+counted:
+    ; the region's cell starts in the buffer (exclusive prefix from 0):
+    ; starts[c - first + 1], and the end after the last
+    mov rdi, qword ptr [rsp + 152]
+    add rdi, LB_STARTS_OFF
+    mov dword ptr [rdi], 0
+    add rdi, 4
+    lea r11, [r14 + r9*4]
+    vpxor xmm1, xmm1, xmm1
+    vmovdqa ymm4, ymmword ptr k_bcast7
+    vmovdqa ymm5, ymmword ptr k_bcast3
+    vmovdqa ymm3, ymmword ptr k_upper_half
+    xor eax, eax
+prefix:
+    vmovdqu ymm0, ymmword ptr [r11 + rax*4]
+    vpslldq ymm2, ymm0, 4
+    vpaddd ymm0, ymm0, ymm2
+    vpslldq ymm2, ymm0, 8
+    vpaddd ymm0, ymm0, ymm2
+    vpermd ymm2, ymm5, ymm0
+    vpand ymm2, ymm2, ymm3
+    vpaddd ymm0, ymm0, ymm2
+    vpaddd ymm0, ymm0, ymm1
+    vpsubd ymm2, ymm0, ymmword ptr [r11 + rax*4]
+    vmovdqu ymmword ptr [rdi + rax*4], ymm2
+    vpermd ymm1, ymm4, ymm0
+    add eax, 8
+    cmp eax, dword ptr [rsp + 28]
+    jb prefix
+    vmovd edx, xmm1                    ; the region's entities
+    vzeroupper
+    mov dword ptr [rdi + rax*4], edx
+    mov dword ptr [rsp + 8], edx
+    ; the starts, biased by the region's first cell: [p + cell * 4 + 4]
+    mov eax, r9d
+    shl rax, 2
+    sub rdi, 4
+    sub rdi, rax
+    mov qword ptr [rsp + 96], rdi      ; (the lane scratch's last word: free now)
+    ; the movers by (cell, seq): few, keys in list order then an insertion
+    ; sort; many, counted per cell, placed by start, then insertion by key
+    mov r13, qword ptr [rsp + 152]
+    add r13, LB_S_OFF                  ; S: the sorted movers' storage indices
+    mov r14, qword ptr [rsp + 152]
+    add r14, LB_K_OFF                  ; K: their keys (cell << 32 | seq)
+    cmp r15d, MERGE_FEW
+    jae many
+    mov r11, sim_seq
+    xor ecx, ecx
+few_keys:
+    cmp ecx, r15d
+    jae placed
+    mov eax, dword ptr [rbp + rcx*8]
+    mov dword ptr [r13 + rcx*4], eax
+    mov edx, dword ptr [rbp + rcx*8 + 4]
+    shl rdx, 32
+    mov eax, dword ptr [r11 + rax*4]
+    and eax, 0x3FFFFFFF
+    or rdx, rax
+    mov qword ptr [r14 + rcx*8], rdx
+    inc ecx
+    jmp few_keys
+many:
+    mov r11, qword ptr [rsp + 152]
+    add r11, LB_MCOUNT_OFF
+    mov rdi, r11
+    mov eax, r9d
+    shl rax, 2
+    sub r11, rax                       ; [r11 + cell * 4]
+    vpxor xmm0, xmm0, xmm0
+    mov ecx, dword ptr [rsp + 28]
+    shr ecx, 3
+mzero:
+    vmovdqu ymmword ptr [rdi], ymm0
+    add rdi, 32
+    dec ecx
+    jnz mzero
+    xor ecx, ecx
+mcount:
+    cmp ecx, r15d
+    jae mcounted
+    mov eax, dword ptr [rbp + rcx*8 + 4]
+    inc dword ptr [r11 + rax*4]
+    inc ecx
+    jmp mcount
+mcounted:
+    lea rdi, [r11 + r9*4]
+    vpxor xmm1, xmm1, xmm1
+    vmovdqa ymm4, ymmword ptr k_bcast7
+    vmovdqa ymm5, ymmword ptr k_bcast3
+    vmovdqa ymm3, ymmword ptr k_upper_half
+    xor ecx, ecx
+mprefix:
+    vmovdqu ymm0, ymmword ptr [rdi + rcx*4]
+    vpslldq ymm2, ymm0, 4
+    vpaddd ymm0, ymm0, ymm2
+    vpslldq ymm2, ymm0, 8
+    vpaddd ymm0, ymm0, ymm2
+    vpermd ymm2, ymm5, ymm0
+    vpand ymm2, ymm2, ymm3
+    vpaddd ymm0, ymm0, ymm2
+    vpaddd ymm0, ymm0, ymm1
+    vpsubd ymm2, ymm0, ymmword ptr [rdi + rcx*4]
+    vmovdqu ymmword ptr [rdi + rcx*4], ymm2
+    vpermd ymm1, ymm4, ymm0
+    add ecx, 8
+    cmp ecx, dword ptr [rsp + 28]
+    jb mprefix
+    vzeroupper
+    xor ecx, ecx
+mplace:
+    cmp ecx, r15d
+    jae placed
+    mov eax, dword ptr [rbp + rcx*8]
+    mov edx, dword ptr [rbp + rcx*8 + 4]
+    mov edi, dword ptr [r11 + rdx*4]
+    inc dword ptr [r11 + rdx*4]
+    mov dword ptr [r13 + rdi*4], eax
+    mov r10, sim_seq
+    mov r10d, dword ptr [r10 + rax*4]
+    and r10d, 0x3FFFFFFF
+    shl rdx, 32
+    or rdx, r10
+    mov qword ptr [r14 + rdi*8], rdx
+    inc ecx
+    jmp mplace
+placed:
+    mov ecx, 1
+msort:
+    cmp ecx, r15d
+    jae sorted
+    mov rdx, qword ptr [r14 + rcx*8]
+    mov eax, dword ptr [r13 + rcx*4]
+    mov edi, ecx
+mshift:
+    test edi, edi
+    jz mput
+    cmp qword ptr [r14 + rdi*8 - 8], rdx
+    jbe mput
+    mov r10, qword ptr [r14 + rdi*8 - 8]
+    mov qword ptr [r14 + rdi*8], r10
+    mov r10d, dword ptr [r13 + rdi*4 - 4]
+    mov dword ptr [r13 + rdi*4], r10d
+    dec edi
+    jmp mshift
+mput:
+    mov qword ptr [r14 + rdi*8], rdx
+    mov dword ptr [r13 + rdi*4], eax
+    inc ecx
+    jmp msort
+sorted:
+    ; the merge: the region's stayers (old order: already (cell, seq) order)
+    ; with the sorted movers, into the buffer, written in order
+    xor ebx, ebx                       ; w
+    mov r12d, dword ptr [rsp + 12]     ; i: the old block
+    xor edx, edx
+    mov dword ptr [rsp + 40], edx      ; k
+    mov rsi, MERGE_NONE
+    test r15d, r15d
+    jz blocks
+    mov rsi, qword ptr [r14]
+blocks:
+    mov eax, dword ptr [rsp + 16]
+    sub eax, r12d
+    jbe merge_tail
+    mov r11, sim_seq
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    vpslld ymm0, ymm1, 1
+    vpor ymm0, ymm0, ymm1
+    vmovmskps edi, ymm0
+    xor edi, 255
+    cmp eax, 8
+    jae block_full
+        bzhi edi, edi, eax
+    block_full:
+    test edi, edi
+    jz next
+    mov rdx, MERGE_NONE
+    cmp rsi, rdx
+    je all_go
+    mov rdx, rsi
+    shr rdx, 32
+    mov r11, qword ptr [rsp + 96]
+    mov edx, dword ptr [r11 + rdx*4 + 4]
+    popcnt eax, edi
+    add eax, ebx
+    cmp eax, edx
+    ja keyed
+all_go:
+    mov dword ptr [rsp + 48], 0
+    mov eax, edi
+    jmp piece_emit
+keyed:
+    mov r11, sim_pos_x
+    vmovups ymm0, ymmword ptr [r11 + r12*4]
+    vaddps ymm0, ymm0, ymmword ptr k_world_half
+    vmulps ymm0, ymm0, ymmword ptr k_inv_cell
+    vcvttps2dq ymm0, ymm0
+    mov r11, sim_pos_z
+    vmovups ymm3, ymmword ptr [r11 + r12*4]
+    vaddps ymm3, ymm3, ymmword ptr k_world_half
+    vmulps ymm3, ymm3, ymmword ptr k_inv_cell
+    vcvttps2dq ymm3, ymm3
+    vpslld ymm3, ymm3, GRID_SHIFT
+    vpaddd ymm0, ymm0, ymm3
+    vpmovzxdq ymm2, xmm1
+    vextracti128 xmm1, ymm1, 1
+    vpmovzxdq ymm5, xmm1
+    vpmovzxdq ymm1, xmm0
+    vpsllq ymm1, ymm1, 32
+    vpor ymm2, ymm2, ymm1
+    vextracti128 xmm1, ymm0, 1
+    vpmovzxdq ymm1, xmm1
+    vpsllq ymm1, ymm1, 32
+    vpor ymm5, ymm5, ymm1
+    mov dword ptr [rsp + 48], edi
+piece:
+    vmovq xmm1, rsi
+    vpbroadcastq ymm1, xmm1
+    vpcmpgtq ymm4, ymm1, ymm2
+    vmovmskpd eax, ymm4
+    vpcmpgtq ymm4, ymm1, ymm5
+    vmovmskpd ecx, ymm4
+    shl ecx, 4
+    or eax, ecx
+    and eax, dword ptr [rsp + 48]
+    jz piece_movers
+    xor dword ptr [rsp + 48], eax
+piece_emit:
+    cmp eax, 255
+    jne piece_pack
+    mov r11, sim_pos_x
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 104]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_pos_z
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 112]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_x
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 120]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_z
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 128]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_seq
+    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 136]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    add ebx, 8
+    jmp next
+piece_pack:
+    ; left-packed (the buffer has room past the region: plain stores)
+    mov rcx, 0x0101010101010101
+    pdep rcx, rax, rcx
+    imul rcx, rcx, 255
+    mov rdx, 0x0706050403020100
+    pext rdx, rdx, rcx
+    vmovq xmm3, rdx
+    vpmovzxbd ymm3, xmm3
+    popcnt ecx, eax
+    mov dword ptr [rsp + 44], ecx
+    mov r11, sim_pos_x
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 104]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_pos_z
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 112]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_x
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 120]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_vel_z
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 128]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    mov r11, sim_seq
+    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
+    mov r11, qword ptr [rsp + 136]
+    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
+    add ebx, dword ptr [rsp + 44]
+    cmp dword ptr [rsp + 48], 0
+    je next
+piece_movers:
+    mov eax, dword ptr [rsp + 48]
+    tzcnt eax, eax
+    lea r9d, [r12 + rax]
+    mov ecx, r9d
+    call cell_of_slot
+    shl rax, 32
+    mov r11, sim_seq
+    mov r11d, dword ptr [r11 + r9*4]
+    or rax, r11
+    mov qword ptr [rsp + 56], rax
+piece_mover:
+    cmp rsi, qword ptr [rsp + 56]
+    jae piece
+    call lb_emit_mover
+    jmp piece_mover
+next:
+    add r12d, 8
+    jmp blocks
+merge_tail:
+    mov rax, MERGE_NONE
+    cmp rsi, rax
+    je merged
+    call lb_emit_mover
+    jmp merge_tail
+merged:
+    vzeroupper
+    ; the band's cells' global starts: the band's base plus their starts in
+    ; the buffer less the band's first; its entities must be the band's count
+    mov r9d, dword ptr [rsp + 24]
+    mov r10, qword ptr [rsp + 96]      ; the biased starts
+    mov eax, dword ptr [rsp + 164]     ; the band's first cell
+    mov r12d, dword ptr [r10 + rax*4 + 4]          ; its first entity in the buffer
+    mov r13d, dword ptr [r10 + rax*4 + 4 + BAND_CELLS * 4]   ; one past its last
+    mov edx, r13d
+    sub edx, r12d
+    cmp edx, dword ptr [rsp + 4]
+    je count_ok
+    mov grid_count_error, 1
+count_ok:
+    mov edx, dword ptr [rsp]
+    sub edx, r12d
+    vmovd xmm1, edx
+    vpbroadcastd ymm1, xmm1            ; base - first
+    lea rsi, [r10 + rax*4 + 4]
+    mov rdi, sim_cell_arr2
+    lea rdi, [rdi + rax*4 + 4]
+    xor ecx, ecx
+own_starts:
+    vpaddd ymm0, ymm1, ymmword ptr [rsi + rcx*4]
+    vmovdqu ymmword ptr [rdi + rcx*4], ymm0
+    add ecx, 8
+    cmp ecx, BAND_CELLS
+    jb own_starts
+    vzeroupper
+    ; separate and integrate the band's rows, on the buffer: this
+    ; participant's columns in its table entry (positions out to the buffer's
+    ; second pair of columns)
+    mov eax, dword ptr [rsp + 64]
+    shl eax, 6
+    lea r11, fz_out_tab
+    add r11, rax
+    mov rax, qword ptr [rsp + 152]
+    lea rdx, [rax + LB_OX_OFF]
+    mov qword ptr [r11], rdx
+    lea rdx, [rax + LB_OZ_OFF]
+    mov qword ptr [r11 + 8], rdx
+    mov rdx, qword ptr [rsp + 104]
+    mov qword ptr [r11 + 16], rdx
+    mov rdx, qword ptr [rsp + 112]
+    mov qword ptr [r11 + 24], rdx
+    mov rdx, qword ptr [rsp + 120]
+    mov qword ptr [r11 + 32], rdx
+    mov rdx, qword ptr [rsp + 128]
+    mov qword ptr [r11 + 40], rdx
+    mov rdx, qword ptr [rsp + 136]
+    mov qword ptr [r11 + 48], rdx
+    lea rdx, [r10 + 4]
+    mov qword ptr [r11 + 56], rdx
+    mov ecx, r12d
+    mov edx, r13d
+    mov r9d, dword ptr [rsp + 64]
+    call sim_separate_v4
+    ; the band's rows out, streaming: integrated x, z, velocities, sequences
+    mov ebx, r13d
+    sub ebx, r12d                      ; count
+    mov r15d, dword ptr [rsp]          ; base
+    mov rax, qword ptr [rsp + 152]
+    lea rsi, [rax + LB_OX_OFF + r12*4]
+    mov rdi, sim_pos_x2
+    lea rdi, [rdi + r15*4]
+    mov ecx, ebx
+    call lb_copy_nt
+    mov rax, qword ptr [rsp + 152]
+    lea rsi, [rax + LB_OZ_OFF + r12*4]
+    mov rdi, sim_pos_z2
+    lea rdi, [rdi + r15*4]
+    mov ecx, ebx
+    call lb_copy_nt
+    mov rax, qword ptr [rsp + 120]
+    lea rsi, [rax + r12*4]
+    mov rdi, sim_vel_x2
+    lea rdi, [rdi + r15*4]
+    mov ecx, ebx
+    call lb_copy_nt
+    mov rax, qword ptr [rsp + 128]
+    lea rsi, [rax + r12*4]
+    mov rdi, sim_vel_z2
+    lea rdi, [rdi + r15*4]
+    mov ecx, ebx
+    call lb_copy_nt
+    mov rax, qword ptr [rsp + 136]
+    lea rsi, [rax + r12*4]
+    mov rdi, sim_seq2
+    lea rdi, [rdi + r15*4]
+    mov ecx, ebx
+    call lb_copy_nt
+    sfence
+    add rsp, 168
+    pop rbp
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
