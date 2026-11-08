@@ -127,3 +127,26 @@ threads, where the C engine's per-thread row buffers keep a band's data in
 L2 while this engine's build streams six columns through L3: its band job
 waits on memory there (uProf: the merge's packing and the movers' copies).
 Closing them is the row-buffer design, a rewrite of the build, not a kernel.
+
+## Round 3: the laptop (2026-11-08/09)
+
+The same two engines on a Ryzen 9 5900HS (8 cores, 16 threads, 16 MB L3).
+With a sixth of the desktop's cache the large populations no longer fit, and
+both engines are bound by memory bandwidth (~20 GB/s here): what counts is
+the bytes an entity moves per tick. The assembly engine started this round at
+0.57 / 0.60 on the large 16-thread cells and 0.80 on 1M one thread; removing
+columns from the per-tick copy (log.md, 2026-11-08/09) brought its bytes to
+about the C engine's and the matrix to three wins and three ties:
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1780 | 1970 | **1.11** |
+| 100k, 16 threads | 216 | 340 | **1.57** |
+| 1M, 1 thread | 14514 | 14393 | 0.99 |
+| 1M, 16 threads | 3745 | 3699 | 0.99 |
+| 1M dense, 1 thread | 30227 | 32178 | **1.06** |
+| 1M dense, 16 threads | 5495 | 5391 | 0.98 |
+
+The ties are within the run-to-run spread. Both engines lose time from 8 to
+16 threads (hyperthreads share a core's bandwidth and L2); the C engine is
+still ~6% ahead at 8 threads on 1M.

@@ -513,3 +513,51 @@ every hash OK (us/tick, 8 rows / 4 rows): 100k 1T 1024 / 1092, 100k 16T
 107 / 116, 1M 1T 8805 / 9164, 1M 16T 912 / 899, dense 1T 21458 / 21725,
 dense 16T 2303 / 2196. Four cells worse, two better (dense 16T by 5%), and
 the 100k 16T cell falls behind the C rival (110). **Reverted to 8 rows.**
+
+## 2026-11-08/09: the laptop (Ryzen 9 5900HS, 8 cores / 16 threads, 16 MB L3)
+
+On this machine both engines stop scaling at 4 threads: a copy test reaches
+~20 GB/s whatever the thread count, and the large-population cells are bound
+by the bytes each entity moves per tick. The assembly engine moved ~112 B per
+entity (C ~60), so most of this session removed columns from the per-tick
+copy. Every step is exact (all checks at 1 and 16 threads); ratios are
+interleaved runs against the previous commit (5 rounds unless noted).
+
+| commit | change | effect |
+|---|---|---|
+| 9172958 | merge: plain stores for whole blocks and for packed blocks away from the band's end (masked 256-bit stores are microcoded on Zen 3) | 1M 1T -13% (discarded on the 9950X3D, where it was within noise) |
+| 1162915 | fused bands integrate in place, into a per-thread buffer, rows copied home when no neighbour row is left to separate | 1M 16T -6% |
+| eeca6c4 | no old-cell column: the integration flags a cell change (bit 31), band ranges from the last build's cell starts, leavers' old cells by their neighbours first | 1M 16T -12%, dense 16T -8% |
+| dee2bba | no cell column: flags in the sequence (31 changed, 30 dead), cells from the positions the build reads anyway | 1M 16T -8%, 1M 1T -3% |
+| f70e581 | hp at the sequence number (the build no longer moves it); area effects gather it; sequences renumbered by rank near the map's end (checked by forcing it every tick) | 1M 16T -12%, dense 16T -9% |
+| 227f0f7 | bands of 4 rows again, now with lazily cleared per-band counters (the integration cleared and published all 256 per call) | dense 16T -20% (its bands fuse), others level |
+| f1ca2c4 | rows waiting for a boundary job are not stashed: position = clamp(start + velocity * dt) is computed again from the stored velocity, bit for bit | 1M 16T -9%, dense 16T -4% |
+| ab87baf | collect: the old-range lane mask only at the range's ends | 1M 1T -1% |
+| bec7344 | pool threads at above-normal priority (a preempted worker held up the phase) | 1M 16T -7%, 100k 16T -7% |
+
+Also fixed: the bloom targets were never created (the vcall argument trap:
+`r8` passed as the output pointer after vcall had set `r8` to 0); a window
+resize then released null pointers and crashed on start on this laptop.
+
+Measured and discarded:
+- Fusing the dense crowd with 8-row bands (up to 1/16 of everyone per band,
+  bands handed out largest first): level.
+- Mover and leaver lists built by the integration instead of the window scan:
+  the build saved ~3 M cycles per tick, the integration spent as much (~74k
+  movers per tick at 1M, writing records into cold list memory); 16T +3%.
+- Integer compare for `d2 < 1` (off the FP add pipes): level; the candidate
+  loop waits on its in-order sums.
+- A higher threshold for the merge's insertion sort, skipping all-stayer
+  blocks in the collect, longer worker spin: level or worse.
+
+Contest matrix on this machine, interleaved, 5 rounds, quiet machine
+(C / asm, above 1 the assembly is faster):
+
+| scenario | start of session | now |
+|---|---:|---:|
+| 100k, 1 thread | 1.03 | **1.11** |
+| 100k, 16 threads | 1.62 | **1.57** |
+| 1M, 1 thread | 0.80 | 0.99 |
+| 1M, 16 threads | 0.57 | 0.99 |
+| 1M dense, 1 thread | 0.96 | **1.06** |
+| 1M dense, 16 threads | 0.60 | 0.98 |
