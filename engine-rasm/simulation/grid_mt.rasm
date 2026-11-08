@@ -437,7 +437,26 @@ collect_window:
     vmovmskps r10d, ymm0                           ; changed cell
     vpslld ymm0, ymm0, 1
     vmovmskps r13d, ymm0                           ; dead
-    ; lanes in the band's old slots [old lo, old hi)
+    ; lanes in the band's old slots [old lo, old hi): all of them or none,
+    ; but for the two blocks at its ends
+    mov r11d, edx
+    mov eax, ecx
+    cmp eax, dword ptr [rsp + 12]
+    jb range_below
+    add eax, 8
+    cmp eax, dword ptr [rsp + 16]
+    jbe range_done                     ; wholly inside
+    cmp ecx, dword ptr [rsp + 16]
+    jb range_edge
+    xor r11d, r11d                     ; wholly above
+    jmp range_done
+range_below:
+    add eax, 8
+    cmp eax, dword ptr [rsp + 12]
+    ja range_edge
+    xor r11d, r11d                     ; wholly below
+    jmp range_done
+range_edge:
     mov eax, dword ptr [rsp + 16]
     sub eax, ecx
     jns hi_pos
@@ -463,6 +482,7 @@ collect_window:
     andn r11d, edx, r11d
     mov edx, dword ptr [rsp + 20]
     and r11d, edx
+range_done:
     mov rax, sim_pos_x
     vmovups ymm1, ymmword ptr [rax + rcx*4]
     vaddps ymm1, ymm1, ymmword ptr k_world_half
