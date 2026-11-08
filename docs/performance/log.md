@@ -638,3 +638,6 @@ dense 1T **1.08**, dense 16T 1.00.
 Contest matrix, interleaved, 7 rounds (C / asm):
 100k 1T **1.17**, 100k 16T **1.64**, 1M 1T **1.01**, 1M 16T **1.36**,
 dense 1T **1.09**, dense 16T 1.00.
+- Discarded: dense groups saving their state per row and checking the cap at
+  each row's end (redoing the row exactly, the old `row_exact` path): level
+  to +2%; the per-step saves are not what limits the dense crowd.
