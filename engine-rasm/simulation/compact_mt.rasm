@@ -2,24 +2,13 @@
 ;
 ; Storage is in grid order and the next tick's grid build copies every
 ; survivor anyway (grid_mt.rasm), so the dead are not moved here: the build
-; skips them. This pass only does what the spec's compaction does besides
-; moving: it counts the dead (kills) and the living (sim_alive, which spawning
-; uses), and appends each death's position to the death events, in storage
-; order. Until the build, a dead entity stays in storage with hp <= 0; every
-; reader in between (projectiles, contact, the hash and the dump) already
-; ignores hp <= 0.
-;
-;   count     (chunks)        survivors per chunk (8 lanes per compare, popcnt)
-;   offsets   (main thread)   exclusive prefix of deaths per chunk
-;   events    (chunks)        each death's position at its rank
+; skips them (sequence bit 30). This pass only does what the spec's
+; compaction does besides moving: it counts the dead (kills) and the living
+; (sim_alive, which spawning uses), and appends each death's position to the
+; death events. Until the build, a dead entity stays in storage with hp <= 0;
+; every reader in between (projectiles, contact, the hash and the dump)
+; already ignores hp <= 0.
 
-#define CMP_CHUNK 16384
-#define CMP_SHIFT 14
-#define CMP_CHUNKS 64
-
-cmp_alive: [CMP_CHUNKS]u32 = {}
-cmp_doff: [CMP_CHUNKS]u32 = {}
-cmp_death_base: u32 = 0
 ; the spare columns (allocated by sim_alloc)
 sim_pos_x2: *f32 = 0
 sim_pos_z2: *f32 = 0
@@ -27,121 +16,6 @@ sim_vel_x2: *f32 = 0
 sim_vel_z2: *f32 = 0
 sim_hp2: *f32 = 0
 sim_seq2: *u32 = 0
-
-; ecx: begin (a multiple of 8), edx: end, r8d: chunk
-compact_count_job: proc(begin: u32, end: u32, chunk: u32) = {
-    mov r9, sim_hp
-    xor r10d, r10d
-    vxorps ymm5, ymm5, ymm5
-block:
-    cmp ecx, edx
-    jae done
-    vmovaps ymm1, ymmword ptr [r9 + rcx*4]
-    vcmpps ymm0, ymm1, ymm5, 30                    ; hp > 0 (GT_OQ)
-    vmovmskps eax, ymm0
-    mov r11d, edx
-    sub r11d, ecx
-    cmp r11d, 8
-    jae full
-        push rcx
-        mov ecx, r11d
-        mov r11d, 1
-        shl r11d, cl
-        dec r11d
-        and eax, r11d
-        pop rcx
-    full:
-    popcnt eax, eax
-    add r10d, eax
-    add ecx, 8
-    jmp block
-done:
-    lea rax, cmp_alive
-    mov dword ptr [rax + r8*4], r10d
-    vzeroupper
-    ret
-}
-
-; ecx: begin, edx: end, r8d: chunk. The chunk's deaths into the death events.
-death_events_job: proc(begin: u32, end: u32, chunk: u32) = {
-    push rbx
-    push rsi
-    push rdi
-    push r12
-    push r13
-    mov esi, ecx
-    mov edi, edx
-    lea rax, cmp_doff
-    mov ebx, dword ptr [rax + r8*4]
-    add ebx, cmp_death_base            ; this chunk's first event
-    mov r9, sim_hp
-    vxorps ymm5, ymm5, ymm5
-block:
-    cmp esi, edi
-    jae done
-    vmovaps ymm1, ymmword ptr [r9 + rsi*4]
-    vcmpps ymm0, ymm1, ymm5, 30                    ; hp > 0
-    vmovmskps r10d, ymm0
-    mov r11d, 255
-    mov eax, edi
-    sub eax, esi
-    cmp eax, 8
-    jae full
-        mov ecx, eax
-        mov r11d, 1
-        shl r11d, cl
-        dec r11d
-    full:
-    andn r12d, r10d, r11d              ; dead lanes
-    test r12d, r12d
-    jz next_block
-dead:
-    tzcnt ecx, r12d
-    blsr r12d, r12d
-    ; the next build will not have it: no cell, out of its band's counts
-    lea eax, [rsi + rcx]
-    mov r13, sim_cell
-    mov edx, dword ptr [r13 + rax*4]
-    cmp edx, -1
-    je uncounted
-    mov dword ptr [r13 + rax*4], -1
-    mov r8d, edx
-    and r8d, 0x7FFFFFFF
-    shr r8d, BAND_SHIFT
-    lea r13, next_band_total
-    lock dec dword ptr [r13 + r8*4]
-    test edx, edx
-    jns uncounted                      ; it kept its cell: not a mover
-    lea r13, next_mov_total
-    lock dec dword ptr [r13 + r8*4]
-uncounted:
-    cmp ebx, DEATH_EVENTS_MAX
-    jae counted
-    lea eax, [rsi + rcx]
-    mov r13, sim_pos_x
-    mov edx, dword ptr [r13 + rax*4]
-    lea r13, death_x
-    mov dword ptr [r13 + rbx*4], edx
-    mov r13, sim_pos_z
-    mov edx, dword ptr [r13 + rax*4]
-    lea r13, death_z
-    mov dword ptr [r13 + rbx*4], edx
-counted:
-    inc ebx
-    test r12d, r12d
-    jnz dead
-next_block:
-    add esi, 8
-    jmp block
-done:
-    vzeroupper
-    pop r13
-    pop r12
-    pop rdi
-    pop rsi
-    pop rbx
-    ret
-}
 
 ; The dead of this tick: every hit that took an entity's hp from > 0 to <= 0
 ; appended its slot to dead_list (projectiles serially, the area effects with
@@ -188,20 +62,23 @@ dead:
     lea r9, death_z
     mov dword ptr [r9 + rcx*4], edx
 no_event:
-    mov r9, sim_cell
+    ; out of the next build: sequence bit 30, and out of its band's counts
+    ; (bit 31: it changed cell, so it was counted a mover too)
+    mov r9, sim_seq
     mov edx, dword ptr [r9 + rax*4]
-    cmp edx, -1
-    je counted
-    mov dword ptr [r9 + rax*4], -1
-    mov ecx, edx
-    and ecx, 0x7FFFFFFF
-    shr ecx, BAND_SHIFT
+    test edx, 0x40000000
+    jnz counted
+    or dword ptr [r9 + rax*4], 0x40000000
+    mov r11d, edx
+    mov ecx, eax
+    call cell_of_slot
+    shr eax, BAND_SHIFT
     lea r10, next_band_total
-    dec dword ptr [r10 + rcx*4]
-    test edx, edx
-    jns counted                        ; it kept its cell (bit 31 clear): not a mover
+    dec dword ptr [r10 + rax*4]
+    test r11d, r11d
+    jns counted
     lea r10, next_mov_total
-    dec dword ptr [r10 + rcx*4]
+    dec dword ptr [r10 + rax*4]
 counted:
     inc edi
     cmp edi, esi

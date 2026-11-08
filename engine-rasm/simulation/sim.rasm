@@ -41,7 +41,7 @@ sim_sorted_id: *u32 = 0
 ; index order is creation order (stable removal, spawns append), so sim_seq
 ; recovers it where it matters: the hash and the state dump.
 #define ORDER_MAP_MAX 4194304
-sim_seq: *u32 = 0
+sim_seq: *u32 = 0                      ; bit 31: changed cell this tick, 30: dead (grid_mt.rasm)
 sim_next_seq: u32 = 0
 sim_cell2: *u32 = 0                    ; the next build's cells, written by the fused integration
 sim_slot_cell: *u32 = 0                ; a spare column (the index gather's scratch)
@@ -214,7 +214,7 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_sorted_id_own, rax
-    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 8)
     test rax, rax
     jz failed
     mov sim_band_ids, rax
@@ -955,6 +955,7 @@ map:
     vcomiss xmm0, xmm1
     jbe unmapped                       ; dead this tick: not in the spec's state
     mov eax, dword ptr [rsi + rcx*4]
+    and eax, 0x3FFFFFFF                ; (bits 31, 30: the grid build's flags)
     mov dword ptr [rdi + rax*4], ecx
 unmapped:
     inc ecx

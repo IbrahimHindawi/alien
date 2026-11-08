@@ -28,7 +28,7 @@ fz_inplace: u32 = 0                    ; this build's fused bands integrate in p
 #define FZ_INPLACE_MIN 262144
 fz_pend_x: *f32 = 0                    ; integrated rows waiting for their boundary job (sim_pos3)
 fz_pend_z: *f32 = 0                       ; per participant 1 << FZ_PART_SHIFT bytes: x, then z (sim_alloc)
-fz_cell: *u32 = 0                      ; the next build's cell of each slot, bit 31: changed cell (written here)
+fz_seq: *u32 = 0                       ; the slots' sequences: bit 31 set here when the cell changes
 next_band_total: [128]u32 = {}         ; the next build's members and movers per band
 next_mov_total: [128]u32 = {}
 grid_maxdisp: u32 = 0                  ; the largest |move| on one axis this tick (f32 bits, >= 0)
@@ -578,8 +578,8 @@ separated:
     ; the lanes' new cells for the next build: per slot, and counted per band
     ; (members, and movers). A slot's cell in this build's order is the cell
     ; of its start position (positions change only here and at spawns), so a
-    ; lane that changes cell is known here: bit 31 of its stored cell says so,
-    ; and the next build needs no column of old cells.
+    ; lane that changes cell is known here: bit 31 of its sequence says so,
+    ; and the next build needs no column of cells (it has the positions).
     vaddps ymm10, ymm8, ymmword ptr k_world_half
     vmulps ymm10, ymm10, ymmword ptr k_inv_cell
     vcvttps2dq ymm10, ymm10
@@ -598,11 +598,13 @@ separated:
     vpaddd ymm12, ymm12, ymm13                     ; cells as of this build
     vpcmpeqd ymm12, ymm12, ymm10                   ; kept their cell
     vmovmskps r11d, ymm12
-    vpandn ymm13, ymm12, ymmword ptr k_cell_moved
-    vpor ymm13, ymm13, ymm10                       ; as stored
-    vmovdqu ymmword ptr [rsp], ymm13
+    vmovdqu ymmword ptr [rsp], ymm10
     mov ecx, dword ptr [rsp + 224]
-    mov r14, fz_cell
+    mov r14, fz_seq
+    vpandn ymm13, ymm12, ymmword ptr k_cell_moved
+    vmovdqu ymm12, ymmword ptr [r14 + rsi*4]
+    vpand ymm12, ymm12, ymmword ptr k_abs
+    vpor ymm13, ymm13, ymm12                       ; the sequences, flagged
     ; the usual case, all lanes in one band: one store, two popcounts
     vpsrld ymm11, ymm10, BAND_SHIFT
     vpbroadcastd ymm12, xmm11
@@ -612,12 +614,6 @@ separated:
     and eax, edx
     cmp eax, edx
     jne cell_lanes                     ; the group spans bands: lane by lane
-    cmp ecx, 8
-    jb cells_masked
-    vmovdqu ymmword ptr [r14 + rsi*4], ymm13
-    jmp cells_stored
-cells_masked:
-    vpmaskmovd ymmword ptr [r14 + rsi*4], ymm5, ymm13
 cells_stored:
     vmovd edi, xmm11
     popcnt eax, edx
@@ -630,20 +626,26 @@ cell_lanes:
     xor edx, edx
 cell_lane:
     mov eax, dword ptr [rsp + rdx*4]
-    lea r8d, [rsi + rdx]
-    mov dword ptr [r14 + r8*4], eax
     mov edi, eax
-    and edi, 0x7FFFFFFF
     shr edi, BAND_SHIFT
     inc dword ptr [rsp + rdi*4 + 288]
-    test eax, eax
-    jns cell_stays
+    bt r11d, edx
+    jc cell_stays
     inc dword ptr [rsp + rdi*4 + 800]
 cell_stays:
     inc edx
     cmp edx, ecx
     jb cell_lane
 cells_counted:
+    ; the sequences with this tick's flags (the group's own slots)
+    mov ecx, dword ptr [rsp + 224]
+    cmp ecx, 8
+    jb seq_masked
+    vmovdqu ymmword ptr [r14 + rsi*4], ymm13
+    jmp seq_stored
+seq_masked:
+    vpmaskmovd ymmword ptr [r14 + rsi*4], ymm5, ymm13
+seq_stored:
     mov r11, qword ptr [rsp + 1312]
     mov r8, qword ptr [rsp + 1320]
     mov ecx, dword ptr [rsp + 224]
