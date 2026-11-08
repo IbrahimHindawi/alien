@@ -35,20 +35,20 @@
 ; work is a sequential pass plus work in proportion to the movers.
 
 ; the band shape (rows per band, and what follows from it)
-#define BAND_ROWS 4
-#define BAND_ROW_SHIFT 2
-#define BAND_SHIFT 12
-#define BAND_CELLS 4096
-#define GRID_BANDS 256
-#define GRID_BANDS_1 257
-#define GRID_BANDS_2 512
+#define BAND_ROWS 8
+#define BAND_ROW_SHIFT 3
+#define BAND_SHIFT 13
+#define BAND_CELLS 8192
+#define GRID_BANDS 128
+#define GRID_BANDS_1 129
+#define GRID_BANDS_2 256
 ; a bin histogram row is GRID_BANDS u32: 1 << BAND_TABLE_SHIFT bytes
-#define BAND_TABLE_SHIFT 10
+#define BAND_TABLE_SHIFT 9
 ; BIN_CHUNKS * GRID_BANDS
-#define BIN_HIST_N 16384
+#define BIN_HIST_N 8192
 ; GRID_BANDS * 8, GRID_BANDS * (BAND_ROWS + 1)
-#define GRID_BANDS_8 2048
-#define GRID_BANDS_ROWS1 1280
+#define GRID_BANDS_8 1024
+#define GRID_BANDS_ROWS1 1152
 #define BIN_CHUNK 16384
 #define BIN_CHUNKS 64
 
@@ -1585,8 +1585,6 @@ bands_ready:
     mov grid_local, 0
     cmp grid_windowed, 0
     je local_decided
-    cmp grid_fuse_now, 0
-    je local_decided
     cmp grid_live, FZ_INPLACE_MIN
     jb local_decided
     mov eax, pool_parts
@@ -1688,7 +1686,7 @@ inplace_decided:
     mov hb_open_n, 0
     lea rdi, hb_open_ready
     xor eax, eax
-    mov ecx, GRID_BANDS
+    mov ecx, LB_JOBS
     rep stosd
     cmp grid_local, 0
     je no_help
@@ -1697,9 +1695,30 @@ inplace_decided:
 no_help:
     mov rcx, grid_band_job_timed&
     mov edx, GRID_BANDS
+    cmp grid_local, 0
+    je band_chunks
+    mov edx, LB_JOBS                   ; (local: jobs of LB_ROWS rows, two per band)
+band_chunks:
     mov r8d, 1
     call pool_dispatch
     mov pool_help, 0
+    ; (local: a band's two jobs hold its entities)
+    cmp grid_local, 0
+    je halves_checked
+    lea r8, lb_count
+    lea r9, band_total
+    xor ecx, ecx
+halves:
+    mov eax, dword ptr [r8 + rcx*8]
+    add eax, dword ptr [r8 + rcx*8 + 4]
+    cmp eax, dword ptr [r9 + rcx*4]
+    je half_ok
+    mov grid_count_error, 1
+half_ok:
+    inc ecx
+    cmp ecx, GRID_BANDS
+    jb halves
+halves_checked:
     call grid_stamp
     mov rcx, rax
     sub rcx, qword ptr [rsp + 24]
@@ -1747,6 +1766,8 @@ starts_kept:
     mov sim_seq2, rax
     cmp grid_fuse, 0
     je unfused
+    cmp grid_local, 0
+    jne cells_swap                     ; (local: the integrated positions are out)
     cmp grid_fuse_now, 0
     je by_slots
     ; (every boundary was claimed by one of its two bands; in place, every

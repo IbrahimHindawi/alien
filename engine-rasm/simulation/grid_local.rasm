@@ -41,8 +41,16 @@
 #define LB_K_OFF 2695808
 #define LB_PART_SHIFT 22
 ; at most this many entities in a band for the local build (a region holds three)
-#define LB_BAND_MAX 20000
+#define LB_BAND_MAX 60000
 #define LB_PARTS 32
+; a local job: LB_ROWS rows (half a band)
+#define LB_ROWS 4
+#define LB_ROW_SHIFT 2
+#define LB_SHIFT 12
+#define LB_OWN_CELLS 4096
+#define LB_JOBS 256
+#define LB_JOBS_8 2048
+#define LB_JOBS_ROWS1 1280
 
 lb_buf: *u8 = 0                         ; LB_PARTS << LB_PART_SHIFT bytes (sim_alloc)
 lb_row_old: [1025]u32 = {}              ; each row's first slot in the last build ([1024]: their end)
@@ -188,13 +196,14 @@ done:
 ; counts itself in hb_busy before taking a row, and the band's job waits for
 ; hb_busy to drop to 0 before its rows go out: once its own take fails no
 ; helper can take a row, and every helper that took one counted itself first.
-hb_tab: [GRID_BANDS_8]u64 = {}
-hb_rows: [GRID_BANDS_ROWS1]u32 = {}
-hb_next: [GRID_BANDS]u32 = {}
-hb_busy: [GRID_BANDS]u32 = {}
-hb_open: [GRID_BANDS]u32 = {}           ; the bands published this build, in order
-hb_open_ready: [GRID_BANDS]u32 = {}     ; (entry i written)
+hb_tab: [LB_JOBS_8]u64 = {}
+hb_rows: [LB_JOBS_ROWS1]u32 = {}
+hb_next: [LB_JOBS]u32 = {}
+hb_busy: [LB_JOBS]u32 = {}
+hb_open: [LB_JOBS]u32 = {}           ; the bands published this build, in order
+hb_open_ready: [LB_JOBS]u32 = {}     ; (entry i written)
 hb_open_n: u32 = 0
+lb_count: [LB_JOBS]u32 = {}             ; each local job's entities (a band's two must sum to its count)
 
 ; ecx: this participant, out of band jobs. Separates rows of published bands
 ; until none is left to take.
@@ -219,14 +228,14 @@ scan:
     mov ebx, dword ptr [rax + rdi*4]
 take:
     lea rax, hb_next
-    cmp dword ptr [rax + rbx*4], BAND_ROWS
+    cmp dword ptr [rax + rbx*4], LB_ROWS
     jae next_band
     lea rax, hb_busy
     lock inc dword ptr [rax + rbx*4]
     mov eax, 1
     lea rdx, hb_next
     lock xadd dword ptr [rdx + rbx*4], eax
-    cmp eax, BAND_ROWS
+    cmp eax, LB_ROWS
     jae release
     mov r13d, eax
     ; the band's columns into this participant's entry
@@ -243,7 +252,7 @@ take:
     vmovdqu ymm0, ymmword ptr [rdx + 32]
     vmovdqu ymmword ptr [rcx + 32], ymm0
     vzeroupper
-    imul eax, ebx, BAND_ROWS + 1
+    imul eax, ebx, LB_ROWS + 1
     add eax, r13d
     lea rdx, hb_rows
     mov ecx, dword ptr [rdx + rax*4]
@@ -303,22 +312,24 @@ grid_band_local: proc(begin: u32, end: u32, band: u32) = {
     add rax, LB_COL_BYTES
     mov qword ptr [rsp + 136], rax
     mov eax, ebx
-    shl eax, BAND_SHIFT
-    mov dword ptr [rsp + 164], eax
-    lea rax, band_offset
-    mov eax, dword ptr [rax + rbx*4]
-    mov dword ptr [rsp], eax
-    lea rax, band_total
-    mov eax, dword ptr [rax + rbx*4]
-    mov dword ptr [rsp + 4], eax
+    shl eax, LB_SHIFT
+    mov dword ptr [rsp + 164], eax     ; the job's first cell
+    mov eax, ebx
+    shr eax, BAND_ROW_SHIFT - LB_ROW_SHIFT      ; its band
+    lea rdx, band_offset
+    mov edx, dword ptr [rdx + rax*4]
+    mov dword ptr [rsp], edx           ; the band's base (the first half's)
+    lea rdx, band_total
+    mov edx, dword ptr [rdx + rax*4]
+    mov dword ptr [rsp + 4], edx       ; the band's entities
     ; the region: the band's rows and one either side, clamped; its old slots
     mov eax, ebx
-    shl eax, BAND_ROW_SHIFT
+    shl eax, LB_ROW_SHIFT
     lea ecx, [rax - 1]
     xor edx, edx
     test ecx, ecx
     cmovs ecx, edx                     ; first row
-    lea edx, [rax + BAND_ROWS + 1]
+    lea edx, [rax + LB_ROWS + 1]
     mov r10d, GRID_DIM
     cmp edx, r10d
     cmova edx, r10d                    ; end row
@@ -847,13 +858,21 @@ merged:
     mov r10, qword ptr [rsp + 96]      ; the biased starts
     mov eax, dword ptr [rsp + 164]     ; the band's first cell
     mov r12d, dword ptr [r10 + rax*4 + 4]          ; its first entity in the buffer
-    mov r13d, dword ptr [r10 + rax*4 + 4 + BAND_CELLS * 4]   ; one past its last
+    mov r13d, dword ptr [r10 + rax*4 + 4 + LB_OWN_CELLS * 4]   ; one past its last
     mov edx, r13d
-    sub edx, r12d
-    cmp edx, dword ptr [rsp + 4]
-    je count_ok
-    mov grid_count_error, 1
+    sub edx, r12d                      ; the job's entities
+    mov ecx, dword ptr [rsp + 160]
+    lea rax, lb_count
+    mov dword ptr [rax + rcx*4], edx
+    ; the band's second half starts after its first: the band's base plus its
+    ; entities less this half's (sim_grid_mt checks the halves sum)
+    test ecx, 1
+    jz count_ok
+    mov eax, dword ptr [rsp + 4]
+    sub eax, edx
+    add dword ptr [rsp], eax
 count_ok:
+    mov eax, dword ptr [rsp + 164]
     mov edx, dword ptr [rsp]
     sub edx, r12d
     vmovd xmm1, edx
@@ -866,7 +885,7 @@ own_starts:
     vpaddd ymm0, ymm1, ymmword ptr [rsi + rcx*4]
     vmovdqu ymmword ptr [rdi + rcx*4], ymm0
     add ecx, 8
-    cmp ecx, BAND_CELLS
+    cmp ecx, LB_OWN_CELLS
     jb own_starts
     vzeroupper
     ; separate and integrate the band's rows, on the buffer: this
@@ -905,7 +924,7 @@ own_starts:
     vmovdqu ymm0, ymmword ptr [r11 + 32]
     vmovdqu ymmword ptr [rdx + 32], ymm0
     vzeroupper
-    imul eax, ecx, BAND_ROWS + 1
+    imul eax, ecx, LB_ROWS + 1
     lea rdx, hb_rows
     lea rdx, [rdx + rax*4]
     mov eax, dword ptr [rsp + 164]     ; the band's first cell
@@ -915,7 +934,7 @@ publish_rows:
     mov dword ptr [rdx + r8*4], r9d
     add eax, GRID_DIM
     inc r8d
-    cmp r8d, BAND_ROWS
+    cmp r8d, LB_ROWS
     jbe publish_rows
     lea rax, hb_next
     mov dword ptr [rax + rcx*4], 0
@@ -932,9 +951,9 @@ own_rows:
     mov eax, 1
     lea rdx, hb_next
     lock xadd dword ptr [rdx + rcx*4], eax
-    cmp eax, BAND_ROWS
+    cmp eax, LB_ROWS
     jae own_done
-    imul ecx, ecx, BAND_ROWS + 1
+    imul ecx, ecx, LB_ROWS + 1
     add ecx, eax
     lea rdx, hb_rows
     mov eax, ecx
