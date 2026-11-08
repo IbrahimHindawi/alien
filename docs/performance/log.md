@@ -641,3 +641,27 @@ dense 1T **1.09**, dense 16T 1.00.
 - Discarded: dense groups saving their state per row and checking the cap at
   each row's end (redoing the row exactly, the old `row_exact` path): level
   to +2%; the per-step saves are not what limits the dense crowd.
+
+## 2026-11-09: 8-row bands with 4-row local jobs (kept)
+
+- e065e37: the windowed build (one thread, few threads) prefers 8-row bands
+  (less window overhead: 1M 1T -3%), the local build at 16 threads prefers
+  4-row jobs (balance; and with 8-row bands the dense crowd's bands passed the
+  fusing threshold, which the local decision had required). Now both: bands
+  of 8 rows, and the local build runs jobs of 4 rows, two per band. The first
+  half's base is the band's; the second half's is the band's base plus the
+  band's entities less its own (known after its prefix), and sim_grid_mt
+  checks that each band's halves sum to its count. The local decision no
+  longer requires the fusing threshold (local jobs separate everything
+  themselves). Interleaved vs d2ef715: every cell 0 to 3% faster.
+
+Contest matrix, interleaved, 9 rounds (C / asm), every hash OK:
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1639 | 1970 | **1.20** |
+| 100k, 16 threads | 200 | 341 | **1.71** |
+| 1M, 1 thread | 13996 | 14269 | **1.02** |
+| 1M, 16 threads | 2656 | 3541 | **1.33** |
+| 1M dense, 1 thread | 29453 | 32191 | **1.09** |
+| 1M dense, 16 threads | 5206 | 5357 | **1.03** |

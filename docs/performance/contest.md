@@ -164,3 +164,22 @@ and streams its output out, no boundary jobs; log.md, 2026-11-09) took the
 | 1M, 16 threads | 2720 | 3574 | **1.31** |
 | 1M dense, 1 thread | 29720 | 32069 | **1.08** |
 | 1M dense, 16 threads | 5480 | 5345 | 0.98 |
+
+By the end of the round (log.md, 2026-11-09) the assembly engine was ahead
+in every cell on this machine (interleaved, 9 rounds, every hash OK):
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1639 | 1970 | **1.20** |
+| 100k, 16 threads | 200 | 341 | **1.71** |
+| 1M, 1 thread | 13996 | 14269 | **1.02** |
+| 1M, 16 threads | 2656 | 3541 | **1.33** |
+| 1M dense, 1 thread | 29453 | 32191 | **1.09** |
+| 1M dense, 16 threads | 5206 | 5357 | **1.03** |
+
+The margins on 1M one thread and dense 16 threads are small (2 and 3%,
+about the run-to-run spread here). The large ones come from design steps the
+C engine also has (fewer bytes per entity, a cache-resident band build with
+streamed output) plus a few it does not (the cap checked once per sparse
+group, help with rows of large bands, the build's shape chosen per thread
+count).
