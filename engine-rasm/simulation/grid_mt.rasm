@@ -1659,9 +1659,13 @@ old_ranges:
     mov eax, grid_built_n
     mov dword ptr [r9 + GRID_BANDS * 4], eax
 ranges_done:
+    ; in place for large populations on more than one thread (alone, the
+    ; copies cost more than the traffic they save: 1M 1T +1%, 4T -6%)
     mov fz_inplace, 0
     cmp grid_live, FZ_INPLACE_MIN
     jb inplace_decided
+    cmp pool_parts, 1
+    jbe inplace_decided
     mov fz_inplace, 1
 inplace_decided:
     inc grid_build_id
