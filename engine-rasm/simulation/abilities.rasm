@@ -373,11 +373,14 @@ none:
     ret
 }
 
+k_seq_number: [8]const u32[align(32)] = { 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF }
+
 ; ecx: first slot, edx: one past the last (any slots: the tail is masked)
 area_job: proc(begin: u32, end: u32, chunk: u32) = {
+    push rbx
     push rsi
     push rdi
-    sub rsp, 120                       ; 8 + 16 + 120 = 144; xmm6..12 at [rsp ..]
+    sub rsp, 176                       ; 8 + 24 + 176 = 208; xmm6..12 at [rsp ..], [rsp + 112] hp before, [rsp + 144] sequences
     movaps xmmword ptr [rsp], xmm6
     movaps xmmword ptr [rsp + 16], xmm7
     movaps xmmword ptr [rsp + 32], xmm8
@@ -399,7 +402,23 @@ block:
     vmovups ymm1, ymmword ptr [r9 + rax*4]         ; pz
     vmovups ymm2, ymmword ptr [r10 + rax*4]        ; vx
     vmovups ymm3, ymmword ptr [r11 + rax*4]        ; vz
-    vmovups ymm4, ymmword ptr [rsi + rax*4]        ; hp
+    ; hp lives at the sequence number: gathered for the block's own lanes
+    mov ecx, edi
+    sub ecx, eax
+    cmp ecx, 8
+    jbe lanes_n
+    mov ecx, 8
+    lanes_n:
+    shl ecx, 5
+    lea rdx, k_lane_valid
+    vmovdqa ymm6, ymmword ptr [rdx + rcx]
+    mov rdx, sim_seq
+    vmovdqu ymm5, ymmword ptr [rdx + rax*4]
+    vpand ymm5, ymm5, ymmword ptr k_seq_number
+    vmovdqu ymmword ptr [rsp + 144], ymm5
+    vpxor xmm4, xmm4, xmm4
+    vpgatherdd ymm4, dword ptr [rsi + ymm5*4], ymm6
+    vmovups ymmword ptr [rsp + 112], ymm4          ; hp
     cmp fx_pulse, 0
     je no_pulse
         vbroadcastss ymm5, pulse_cx
@@ -497,7 +516,7 @@ block:
     ; the lanes this block killed (hp was > 0, is now <= 0) go to the dead list
     vxorps xmm5, xmm5, xmm5
     vcmpps ymm6, ymm4, ymm5, 18                    ; new hp <= 0 (LE_OQ)
-    vmovups ymm7, ymmword ptr [rsi + rax*4]        ; the hp before (not stored yet)
+    vmovups ymm7, ymmword ptr [rsp + 112]          ; the hp before
     vcmpps ymm7, ymm7, ymm5, 30                    ; > 0
     vandps ymm6, ymm6, ymm7
     vmovmskps ecx, ymm6
@@ -525,7 +544,6 @@ killed_none:
     jb partial
     vmovups ymmword ptr [r10 + rax*4], ymm2
     vmovups ymmword ptr [r11 + rax*4], ymm3
-    vmovups ymmword ptr [rsi + rax*4], ymm4
     jmp stored
 partial:
     shl ecx, 5
@@ -533,8 +551,28 @@ partial:
     vmovdqa ymm5, ymmword ptr [rdx + rcx]
     vmaskmovps ymmword ptr [r10 + rax*4], ymm5, ymm2
     vmaskmovps ymmword ptr [r11 + rax*4], ymm5, ymm3
-    vmaskmovps ymmword ptr [rsi + rax*4], ymm5, ymm4
 stored:
+    ; hp back at the sequence numbers: the block's own lanes it changed
+    vcmpps ymm5, ymm4, ymmword ptr [rsp + 112], 4  ; NEQ_UQ
+    vmovmskps ecx, ymm5
+    mov edx, edi
+    sub edx, eax
+    cmp edx, 8
+    jae hp_all
+        bzhi ecx, ecx, edx
+    hp_all:
+    test ecx, ecx
+    jz hp_done
+    vmovups ymmword ptr [rsp + 112], ymm4
+hp_lane:
+    tzcnt edx, ecx
+    blsr ecx, ecx
+    mov ebx, dword ptr [rsp + rdx*4 + 144]
+    mov edx, dword ptr [rsp + rdx*4 + 112]
+    mov dword ptr [rsi + rbx*4], edx
+    test ecx, ecx
+    jnz hp_lane
+hp_done:
     add eax, 8
     jmp block
 done:
@@ -546,8 +584,9 @@ done:
     movaps xmm10, xmmword ptr [rsp + 64]
     movaps xmm11, xmmword ptr [rsp + 80]
     movaps xmm12, xmmword ptr [rsp + 96]
-    add rsp, 120
+    add rsp, 176
     pop rdi
     pop rsi
+    pop rbx
     ret
 }

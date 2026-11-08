@@ -86,6 +86,7 @@ grid_bin_job: proc(begin: u32, end: u32, chunk: u32) = {
     push rdi
     push r12
     push r13
+    push r14
     mov ebx, ecx                       ; begin
     mov edi, edx                       ; end
     ; this chunk's histogram row, zeroed
@@ -159,12 +160,15 @@ search_left:
 cursor_set:
     mov r13d, dword ptr [r9 + r12*4 + 8]
     mov r8, sim_hp
+    mov r14, sim_seq
     vxorps xmm1, xmm1, xmm1
     mov eax, ebx
 count:
     cmp eax, edi
     jae counted
-    vmovss xmm0, dword ptr [r8 + rax*4]
+    mov edx, dword ptr [r14 + rax*4]
+    and edx, 0x3FFFFFFF
+    vmovss xmm0, dword ptr [r8 + rdx*4]            ; (hp at the sequence number)
     vcomiss xmm0, xmm1
     jbe dead
     mov edx, dword ptr [r10 + rax*4]
@@ -193,6 +197,7 @@ dead:
     inc eax
     jmp count
 counted:
+    pop r14
     pop r13
     pop r12
     pop rdi
@@ -820,10 +825,6 @@ piece_emit:
     vmovdqu ymm1, ymmword ptr [r11 + r12*4]
     mov r11, sim_vel_z2
     vmovdqu ymmword ptr [r11 + rbx*4], ymm1
-    mov r11, sim_hp
-    vmovdqu ymm1, ymmword ptr [r11 + r12*4]
-    mov r11, sim_hp2
-    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
     mov r11, sim_seq
     vmovdqu ymm1, ymmword ptr [r11 + r12*4]
     mov r11, sim_seq2
@@ -864,10 +865,6 @@ piece_pack:
     vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
     mov r11, sim_vel_z2
     vmovdqu ymmword ptr [r11 + rbx*4], ymm1
-    mov r11, sim_hp
-    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
-    mov r11, sim_hp2
-    vmovdqu ymmword ptr [r11 + rbx*4], ymm1
     mov r11, sim_seq
     vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
     mov r11, sim_seq2
@@ -892,10 +889,6 @@ piece_masked:
     mov r11, sim_vel_z
     vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
     mov r11, sim_vel_z2
-    vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
-    mov r11, sim_hp
-    vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
-    mov r11, sim_hp2
     vpmaskmovd ymmword ptr [r11 + rbx*4], ymm4, ymm1
     mov r11, sim_seq
     vpermd ymm1, ymm3, ymmword ptr [r11 + r12*4]
@@ -1017,8 +1010,6 @@ ordered:
     mov r9, sim_vel_x2
     mov r10, sim_vel_z
     mov r12, sim_vel_z2
-    mov r13, sim_hp
-    mov r14, sim_hp2
     mov r15, sim_seq
     mov rdx, sim_seq2
     mov ecx, dword ptr [rsp]
@@ -1046,8 +1037,6 @@ gather:
     vmovups ymmword ptr [r9 + rcx*4], ymm1
     vmovups ymm1, ymmword ptr [r10 + rax*4]
     vmovups ymmword ptr [r12 + rcx*4], ymm1
-    vmovups ymm1, ymmword ptr [r13 + rax*4]
-    vmovups ymmword ptr [r14 + rcx*4], ymm1
     vmovups ymm1, ymmword ptr [r15 + rax*4]
     vmovups ymmword ptr [rdx + rcx*4], ymm1
     add ecx, 8
@@ -1066,8 +1055,6 @@ gather_slot:
     vmovd dword ptr [r9 + rcx*4], xmm0
     vmovd xmm0, dword ptr [r10 + rax*4]
     vmovd dword ptr [r12 + rcx*4], xmm0
-    vmovd xmm0, dword ptr [r13 + rax*4]
-    vmovd dword ptr [r14 + rcx*4], xmm0
     vmovd xmm0, dword ptr [r15 + rax*4]
     vmovd dword ptr [rdx + rcx*4], xmm0
     inc ecx
@@ -1086,8 +1073,6 @@ gather_one:
     vmovd dword ptr [r9 + rcx*4], xmm0
     vmovd xmm0, dword ptr [r10 + rax*4]
     vmovd dword ptr [r12 + rcx*4], xmm0
-    vmovd xmm0, dword ptr [r13 + rax*4]
-    vmovd dword ptr [r14 + rcx*4], xmm0
     vmovd xmm0, dword ptr [r15 + rax*4]
     vmovd dword ptr [rdx + rcx*4], xmm0
     inc ecx
@@ -1248,10 +1233,6 @@ merge_emit_mover: proc() = {
     mov r11, sim_vel_z
     vmovd xmm0, dword ptr [r11 + rcx*4]
     mov r11, sim_vel_z2
-    vmovd dword ptr [r11 + rbx*4], xmm0
-    mov r11, sim_hp
-    vmovd xmm0, dword ptr [r11 + rcx*4]
-    mov r11, sim_hp2
     vmovd dword ptr [r11 + rbx*4], xmm0
     mov r11, sim_seq
     vmovd xmm0, dword ptr [r11 + rcx*4]
@@ -1630,10 +1611,6 @@ inplace_decided:
     mov rcx, sim_vel_z2
     mov sim_vel_z, rcx
     mov sim_vel_z2, rax
-    mov rax, sim_hp
-    mov rcx, sim_hp2
-    mov sim_hp, rcx
-    mov sim_hp2, rax
     mov rax, sim_seq
     mov rcx, sim_seq2
     mov sim_seq, rcx

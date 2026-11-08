@@ -263,7 +263,10 @@ candidate:
     cmp r8d, ecx
     jae next_row
     mov edi, dword ptr [r12 + r8*4]                ; id
-    vmovss xmm4, dword ptr [rsi + rdi*4]
+    mov rax, sim_seq
+    mov eax, dword ptr [rax + rdi*4]
+    and eax, 0x3FFFFFFF                            ; hp is at the sequence number
+    vmovss xmm4, dword ptr [rsi + rax*4]
     vcomiss xmm4, k_zero
     jbe skip                                       ; already dead
     vsubss xmm2, xmm0, dword ptr [r14 + rdi*4]
@@ -274,7 +277,7 @@ candidate:
     vcomiss xmm2, k_proj_r2
     jae skip
     vsubss xmm4, xmm4, g_damage                    ; hp - damage
-    vmovss dword ptr [rsi + rdi*4], xmm4
+    vmovss dword ptr [rsi + rax*4], xmm4
     vcomiss xmm4, k_zero
     ja hit_alive
     mov edx, edi
@@ -404,7 +407,10 @@ candidate:
     cmp r8d, ecx
     jae next_row
     mov edi, dword ptr [r12 + r8*4]
-    vmovss xmm4, dword ptr [rsi + rdi*4]
+    mov rax, sim_seq
+    mov eax, dword ptr [rax + rdi*4]
+    and eax, 0x3FFFFFFF                ; hp is at the sequence number
+    vmovss xmm4, dword ptr [rsi + rax*4]
     vcomiss xmm4, k_zero
     jbe skip
     vmovss xmm2, dword ptr [r14 + rdi*4]
@@ -510,7 +516,8 @@ retry:
     mov dword ptr [rax + rcx*4], 0
     mov rax, sim_hp
     mov edx, g_spawn_hp
-    mov dword ptr [rax + rcx*4], edx
+    mov r8d, sim_next_seq
+    mov dword ptr [rax + r8*4], edx    ; (hp at the sequence number)
     mov rax, sim_seq
     mov edx, sim_next_seq
     or edx, 0x80000000                 ; no old cell: a mover at the next build

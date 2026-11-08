@@ -113,10 +113,10 @@ sim_alloc: proc() -> b32 = {
     test rax, rax
     jz failed
     mov sim_vel_z, rax
-    invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
+    invoke(arena_push, arena_perm&, (ORDER_MAP_MAX + 16) * 4)
     test rax, rax
     jz failed
-    mov sim_hp, rax
+    mov sim_hp, rax                    ; at the sequence number, not the slot
     invoke(arena_push, arena_perm&, (MAX_ENTITIES + 16) * 4)
     test rax, rax
     jz failed
@@ -789,11 +789,72 @@ done:
 }
 
 ; ecx: keys. One whole tick, with the cycles of each phase recorded.
+; hp lives at the sequence number (only combat touches it, so the grid build
+; does not move it), and sequence numbers only grow, one per spawn: when they
+; near the end of the map, the stored entities are numbered 0, 1, ... again in
+; their order (all the order there is: the hash and the grid order are the
+; same), hp moving down with them.
+sim_renumber: proc() = {
+    push rbx
+    push rsi
+    push rdi
+    sub rsp, 32
+    mov rdi, sim_order_map
+    mov ecx, sim_next_seq
+    mov eax, -1
+    rep stosd
+    mov rsi, sim_seq
+    mov rdi, sim_order_map
+    xor ecx, ecx
+map:
+    cmp ecx, sim_count
+    jae mapped
+    mov eax, dword ptr [rsi + rcx*4]
+    and eax, 0x3FFFFFFF
+    mov dword ptr [rdi + rax*4], ecx
+    inc ecx
+    jmp map
+mapped:
+    mov r8, sim_hp
+    xor ecx, ecx                       ; the old number
+    xor ebx, ebx                       ; the new one
+walk:
+    cmp ecx, sim_next_seq
+    jae walked
+    mov eax, dword ptr [rdi + rcx*4]
+    cmp eax, -1
+    je next
+    mov edx, dword ptr [rsi + rax*4]
+    and edx, 0xC0000000                ; the flags stay
+    or edx, ebx
+    mov dword ptr [rsi + rax*4], edx
+    mov edx, dword ptr [r8 + rcx*4]
+    mov dword ptr [r8 + rbx*4], edx    ; (new <= old: ascending is safe)
+    inc ebx
+next:
+    inc ecx
+    jmp walk
+walked:
+    mov sim_next_seq, ebx
+    inc sim_renumbered
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rbx
+    ret
+}
+sim_renumbered: u32 = 0
+
 sim_step: proc(keys: u32) = {
     push rbx
     push rsi
     sub rsp, 40
     mov esi, ecx
+    cmp sim_next_seq, ORDER_MAP_MAX - MAX_ENTITIES - 16
+    jb numbered
+    call sim_renumber                  ; a long game: room for a tick's spawns
+    numbered:
+    mov ecx, esi
     mov sim_in_keys, ecx
     cmp sim_move_override, 0
     jne moved
@@ -951,11 +1012,11 @@ sim_index_gather: proc() -> b32 = {
 map:
     cmp ecx, sim_count
     jae mapped
-    vmovss xmm0, dword ptr [r10 + rcx*4]
-    vcomiss xmm0, xmm1
-    jbe unmapped                       ; dead this tick: not in the spec's state
     mov eax, dword ptr [rsi + rcx*4]
     and eax, 0x3FFFFFFF                ; (bits 31, 30: the grid build's flags)
+    vmovss xmm0, dword ptr [r10 + rax*4]
+    vcomiss xmm0, xmm1
+    jbe unmapped                       ; dead this tick: not in the spec's state
     mov dword ptr [rdi + rax*4], ecx
 unmapped:
     inc ecx
@@ -986,7 +1047,7 @@ walk:
     mov r8, gx_vel_z
     mov dword ptr [r8 + rbx*4], r9d
     mov r8, sim_hp
-    mov r9d, dword ptr [r8 + rax*4]
+    mov r9d, dword ptr [r8 + rcx*4]   ; (at the sequence number)
     mov r8, gx_hp
     mov dword ptr [r8 + rbx*4], r9d
     inc ebx
