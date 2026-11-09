@@ -665,3 +665,40 @@ Contest matrix, interleaved, 9 rounds (C / asm), every hash OK:
 | 1M, 16 threads | 2656 | 3541 | **1.33** |
 | 1M dense, 1 thread | 29453 | 32191 | **1.09** |
 | 1M dense, 16 threads | 5206 | 5357 | **1.03** |
+
+## 2026-11-09: dense groups cull their window (kept)
+
+- **Culling** (25666bc): cells are 2 m and the separation radius is 1 m, so
+  a lane's 3x3 window is 36 m^2 for a 3 m^2 disc, and a dense group of 8
+  lanes in one cell computes ~130 candidates of which few can hit. A
+  candidate outside the valid lanes' extent widened by 1.001 m is >= 1 m
+  from every lane on some axis, so |dx| or |dz| rounds to >= 1, d2 >= 1: it
+  never hits and adds +-0.0f (nothing, a sum is never -0.0f). Skipping it is
+  exact. Dense groups (more than 3 own-row candidates per lane) now bound
+  their rows and columns by the extent's cells, test the window 8 at a time
+  against the extent, left-pack the survivors (x, z, slot; a 256-entry
+  vpermd table) into a per-participant buffer with far sentinels after them,
+  and run the fast loop over the buffer. The cap is checked per step; a
+  step past it is redone exactly over the buffer (the buffer's slots ascend,
+  so the lanes that met themselves are those below the step's first slot).
+  Interleaved vs e065e37: dense 1T 1.29, dense 16T 1.24, others 1.00-1.02.
+  The C engine scans the full window.
+- Discarded: culling sparse groups too (1M 1T +6%, 100k +8%: their windows
+  are ~30 candidates, the compaction and the extent cost as much as they
+  save); thresholds 2 (level) and 5 per lane (+11% dense); dropping a sparse
+  window's end columns when no lane is within 1 m of them (+5%, branchy or
+  branchless: the test sits on the group's start, ahead of its loads).
+
+Contest matrix, interleaved, 7 rounds (C / asm), every hash OK:
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1552 | 1885 | **1.21** |
+| 100k, 16 threads | 193 | 365 | **1.89** |
+| 1M, 1 thread | 13650 | 13798 | **1.01** |
+| 1M, 16 threads | 2386 | 3116 | **1.31** |
+| 1M dense, 1 thread | 22229 | 31678 | **1.43** |
+| 1M dense, 16 threads | 4039 | 5075 | **1.26** |
+
+(The C engine's 100k 16T run was slower than usual this time, 365 against
+~330 us; that cell is ~1.7 on a typical run.)

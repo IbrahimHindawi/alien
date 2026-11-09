@@ -183,3 +183,18 @@ C engine also has (fewer bytes per entity, a cache-resident band build with
 streamed output) plus a few it does not (the cap checked once per sparse
 group, help with rows of large bands, the build's shape chosen per thread
 count).
+
+A later pass (log.md, 2026-11-09, "dense groups cull their window") made the
+dense crowd's separation skip candidates outside its groups' extent, which is
+exact and which the C engine does not do (interleaved, 7 rounds):
+
+| scenario | asm us | C us | C / asm |
+|---|---:|---:|---:|
+| 100k, 1 thread | 1552 | 1885 | **1.21** |
+| 100k, 16 threads | 193 | 365 | **1.89** |
+| 1M, 1 thread | 13650 | 13798 | **1.01** |
+| 1M, 16 threads | 2386 | 3116 | **1.31** |
+| 1M dense, 1 thread | 22229 | 31678 | **1.43** |
+| 1M dense, 16 threads | 4039 | 5075 | **1.26** |
+
+1M on one thread remains a tie within the spread.
